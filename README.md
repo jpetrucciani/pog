@@ -60,7 +60,7 @@ pog.pog {
 
 or if you want to add it as an overlay to nixpkgs, you can add `pog.overlay` in your overlays for nixpkgs!
 
-using flakes (TODO: fix this):
+using flakes:
 
 ```nix
 {
@@ -73,7 +73,8 @@ using flakes (TODO: fix this):
       system = "x86_64-linux";
     in
     {
-      packages = nixpkgs { inherit system; overlays = [ pog.overlay ]; };
+      packages = nixpkgs { inherit system; overlays = [ pog.overlays.${system}.default ]; };
+      devShells.${system}.default = pkgs.mkShell {nativeBuildInputs = [(pkgs.pog.pog {name = "meme"; script= ''echo meme'';})];};
     };
 }
 ```
