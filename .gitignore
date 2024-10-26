@@ -1,0 +1,5 @@
+result*
+.direnv
+
+# bun/node
+node_modules/
