@@ -1,13 +1,13 @@
 {
   description = "pog";
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
   outputs = { nixpkgs, flake-utils, ... }:
-    flake-utils.lib.eachDefaultSystem (system:
-      let
+    let
+      setup = system: rec {
         pkgs = nixpkgs.legacyPackages.${system};
         pog = import ./. {
           inherit pkgs system;
@@ -17,21 +17,33 @@
           inherit (pog) _ pog;
         };
         builtin = import ./builtin params;
-      in
-      rec {
-        overlays.default = final: prev: { inherit pog; };
-        packages = { inherit pog builtin; };
-        defaultPackage = packages.pog;
+      };
+    in
+    flake-utils.lib.eachDefaultSystem
+      (system:
+        let
+          inherit (setup system) pkgs pog builtin;
+        in
+        rec {
+          packages = { inherit pog builtin; };
+          defaultPackage = packages.pog;
 
-        devShells = {
-          default = pkgs.mkShell {
-            nativeBuildInputs = with pkgs; [
-              bun
-              deadnix
-              nixpkgs-fmt
-              statix
-            ];
+          devShells = {
+            default = pkgs.mkShell {
+              nativeBuildInputs = with pkgs; [
+                bun
+                deadnix
+                nixpkgs-fmt
+                statix
+              ];
+            };
           };
-        };
+        })
+    // flake-utils.lib.eachDefaultSystemPassThrough (system:
+      let
+        inherit (setup system) pkgs pog builtin;
+      in
+      {
+        overlays.default = final: prev: { inherit pog; };
       });
 }

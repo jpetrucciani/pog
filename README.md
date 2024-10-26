@@ -34,8 +34,10 @@ regular import:
 let
   pog = import (fetchTarball {
     name = "pog-2024-10-25";
-    url = "https://github.com/jpetrucciani/pog/main.tar.gz"; # note, you'll probably want to grab a commit sha for this instead of `main`!
-    sha256 = "";                                             # this is necessary, but you can find it by letting nix try to evaluate this!
+    # note, you'll probably want to grab a commit sha for this instead of `main`!
+    url = "https://github.com/jpetrucciani/pog/main.tar.gz";
+    # this is necessary, but you can find it by letting nix try to evaluate this!
+    sha256 = "";
   }) {};
 in
 pog.pog {
