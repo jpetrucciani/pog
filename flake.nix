@@ -19,7 +19,7 @@
         builtin = import ./builtin params;
       };
     in
-    flake-utils.lib.eachDefaultSystem
+    (flake-utils.lib.eachDefaultSystem
       (system:
         let
           inherit (setup system) pkgs pog builtin;
@@ -38,12 +38,12 @@
               ];
             };
           };
-        })
-    // flake-utils.lib.eachDefaultSystemPassThrough (system:
+        }))
+    // (flake-utils.lib.eachDefaultSystemPassThrough (system:
       let
-        inherit (setup system) pkgs pog builtin;
+        inherit (setup system) pog;
       in
       {
         overlays.default = final: prev: { inherit pog; };
-      });
+      }));
 }
