@@ -19,6 +19,7 @@
         builtin = import ./builtin params;
       in
       rec {
+        inherit (pog) overlay;
         packages = { inherit pog builtin; };
         defaultPackage = packages.pog;
 
