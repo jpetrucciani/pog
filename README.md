@@ -58,7 +58,7 @@ pog.pog {
 }
 ```
 
-or if you want to add it as an overlay to nixpkgs, you can add `pog.overlay` in your overlays for nixpkgs!
+or if you want to add it as an overlay to nixpkgs, you can add `pog.overlays.${system}.default` in your overlays for nixpkgs!
 
 using flakes:
 

@@ -30,6 +30,19 @@
               deadnix
               nixpkgs-fmt
               statix
+            ] ++ [
+              (pog.pog {
+                name = "docs";
+                script = ''
+                  ${pkgs.bun}/bin/bunx vitepress dev docs --host 0.0.0.0 "$@"
+                '';
+              })
+              (pog.pog {
+                name = "build_docs";
+                script = ''
+                  ${pkgs.bun}/bin/bunx vitepress build docs "$@"
+                '';
+              })
             ];
           };
         };

@@ -3,3 +3,5 @@ result*
 
 # bun/node
 node_modules/
+docs/.vitepress/dist
+docs/.vitepress/cache
