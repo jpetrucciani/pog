@@ -1,4 +1,4 @@
-## basic example
+## basic examples
 
 ```nix
 TODO

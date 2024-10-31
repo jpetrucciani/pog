@@ -1,3 +1,5 @@
 ## more examples
 
+```nix
 TODO
+```
