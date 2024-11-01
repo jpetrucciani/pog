@@ -18,7 +18,7 @@ features:
     title: Pure Nix Power
     details: Create comprehensive CLI tools using pure Nix, leveraging the vast nixpkgs ecosystem
   - icon: 📖
-    title: Auto-Documentation
+    title: Automatic Documentation
     details: Automatic help text generation, documentation, and tab completion out of the box
   - icon: 🎯
     title: Rich Flag System
