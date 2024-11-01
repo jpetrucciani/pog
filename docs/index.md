@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: 'pog'
+  name: 'pog 🤯'
   text: 'Nix-Powered CLI tools'
   tagline: Create feature-rich CLI tools with Nix and bash - complete with flags, documentation, and more
   actions:
