@@ -2,7 +2,7 @@ import {defineConfig} from 'vitepress';
 
 export default defineConfig({
   lang: 'en-US',
-  title: 'pog',
+  title: 'pog 🤯',
   description: 'pog documentation',
   themeConfig: {
     nav: [
