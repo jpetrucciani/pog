@@ -1,6 +1,8 @@
 # Getting Started
 
-## fetchTarball + import
+## install
+
+### fetchTarball + import
 
 ```nix
 let
@@ -32,7 +34,7 @@ pog.pog {
 
 or if you want to add it as an overlay to nixpkgs, you can add `pog.overlays.${system}.default` in your overlays for nixpkgs!
 
-## flake
+### flake
 
 ```nix
 {
