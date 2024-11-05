@@ -12,7 +12,7 @@ let
 in
 rec {
   overlay = final: prev: { inherit pog; };
-  _ = with pkgs; let
+  _ = let
     core = "${pkgs.coreutils}/bin";
   in
   rec {
@@ -570,16 +570,14 @@ rec {
       shortHelpDoc = if shortDefaultFlags then "-h, " else "";
       shortVerboseDoc = if shortDefaultFlags then "-v, " else "";
       defaultFlagHelp = if showDefaultFlags then "[${shortHelp}--help] [${shortVerbose}--verbose] [--no-color] " else "";
+      completion = import ./completion.nix { inherit _ name argumentCompletion shortDefaultFlags parsedFlags pkgs; };
     in
     pkgs.stdenv.mkDerivation {
       inherit version;
       pname = name;
       dontUnpack = true;
       nativeBuildInputs = [ pkgs.installShellFiles pkgs.shellcheck ];
-      passAsFile = [
-        "text"
-        "completion"
-      ];
+      passAsFile = [ "text" ];
       text = ''
         # shellcheck disable=SC2317
         ${if strict then "set -o errexit -o pipefail -o noclobber" else ""}
@@ -676,64 +674,18 @@ rec {
         # script
         ${if builtins.isFunction script then script helpers else script}
       '';
-      completion =
-        let
-          argCompletion =
-            if argumentCompletion == "files" then ''
-              compopt -o default
-              COMPREPLY=()
-            '' else ''
-              completions=$(${argumentCompletion} "$current")
-              # shellcheck disable=SC2207
-              COMPREPLY=( $(compgen -W "$completions" -- "$current") )
-            '';
-        in
-        ''
-          #!/bin/bash
-          # shellcheck disable=SC2317
-          _${name}()
-          {
-            local current previous completions
-            compopt +o default
 
-            flags(){
-              echo "\
-                ${if shortDefaultFlags then "-h -v " else ""}${concatStringsSep " " (map (x: "-${x.short}") (filter (x: x.short != "") parsedFlags))} \
-                --help --verbose --no-color ${concatStringsSep " " (map (x: "--${x.name}") parsedFlags)}"
-            }
-            executables(){
-              echo -n "$PATH" |
-                ${_.xargs} -d: -I{} -r -- find -L {} -maxdepth 1 -mindepth 1 -type f -executable -printf '%P\n' 2>/dev/null |
-                ${_.sort} -u
-            }
-
-            COMPREPLY=()
-            current="''${COMP_WORDS[COMP_CWORD]}"
-            previous="''${COMP_WORDS[COMP_CWORD-1]}"
-
-            if [[ $current = -* ]]; then
-              completions=$(flags)
-              # shellcheck disable=SC2207
-              COMPREPLY=( $(compgen -W "$completions" -- "$current") )
-            ${concatStringsSep "\n" (map (x: x.completionBlock) parsedFlags)}
-            elif [[ $COMP_CWORD = 1 ]] || [[ $previous = -* && $COMP_CWORD = 2 ]]; then
-              ${argCompletion}
-            else
-              compopt -o default
-              COMPREPLY=()
-            fi
-            return 0
-          }
-          complete -F _${name} ${name}
-        '';
       installPhase = ''
         mkdir -p $out/bin
         echo '#!/bin/bash' >$out/bin/${name}
         cat $textPath >>$out/bin/${name}
         chmod +x $out/bin/${name}
-        shellcheck $out/bin/${name}
-        shellcheck $completionPath
-        installShellCompletion --bash --name ${name} $completionPath
+        installShellCompletion --bash --name ${name} ${completion.bash}
+        installShellCompletion --fish --name ${name} ${completion.fish}
+      '';
+      checkPhase = ''
+        shellcheck $textPath
+        shellcheck ${completion.bash}
       '';
       meta = {
         inherit description;
@@ -762,7 +714,7 @@ rec {
     , hasCompletion ? (stringLength completion) > 0
     , flagPadding ? 20
     }: {
-      inherit short default bool marker description;
+      inherit short default bool marker description hasCompletion required completion;
       name = _name;
       shortOpt = "${short}${marker}";
       longOpt = "${_name}${marker}";
