@@ -12,351 +12,352 @@ let
 in
 rec {
   overlay = final: prev: { inherit pog; };
-  _ = let
-    core = "${pkgs.coreutils}/bin";
-  in
-  rec {
-    # binaries
-    ## text
-    awk = "${pkgs.gawk}/bin/awk";
-    bat = "${pkgs.bat}/bin/bat";
-    curl = "${pkgs.curl}/bin/curl";
-    figlet = "${pkgs.figlet}/bin/figlet";
-    git = "${pkgs.git}/bin/git";
-    gum = "${pkgs.gum}/bin/gum";
-    gron = "${pkgs.gron}/bin/gron";
-    jq = "${pkgs.jq}/bin/jq";
-    rg = "${pkgs.ripgrep}/bin/rg";
-    sed = "${pkgs.gnused}/bin/sed";
-    grep = "${pkgs.gnugrep}/bin/grep";
-    shfmt = "${pkgs.shfmt}/bin/shfmt";
-    cut = "${core}/cut";
-    head = "${core}/head";
-    mktemp = "${core}/mktemp";
-    realpath = "${core}/realpath";
-    sort = "${core}/sort";
-    tail = "${core}/tail";
-    tr = "${core}/tr";
-    uniq = "${core}/uniq";
-    uuid = "${pkgs.libossp_uuid}/bin/uuid";
-    yq = "${pkgs.yq-go}/bin/yq";
-    y2j = "${pkgs.remarshal}/bin/yaml2json";
+  _ =
+    let
+      core = "${pkgs.coreutils}/bin";
+    in
+    rec {
+      # binaries
+      ## text
+      awk = "${pkgs.gawk}/bin/awk";
+      bat = "${pkgs.bat}/bin/bat";
+      curl = "${pkgs.curl}/bin/curl";
+      figlet = "${pkgs.figlet}/bin/figlet";
+      git = "${pkgs.git}/bin/git";
+      gum = "${pkgs.gum}/bin/gum";
+      gron = "${pkgs.gron}/bin/gron";
+      jq = "${pkgs.jq}/bin/jq";
+      rg = "${pkgs.ripgrep}/bin/rg";
+      sed = "${pkgs.gnused}/bin/sed";
+      grep = "${pkgs.gnugrep}/bin/grep";
+      shfmt = "${pkgs.shfmt}/bin/shfmt";
+      cut = "${core}/cut";
+      head = "${core}/head";
+      mktemp = "${core}/mktemp";
+      realpath = "${core}/realpath";
+      sort = "${core}/sort";
+      tail = "${core}/tail";
+      tr = "${core}/tr";
+      uniq = "${core}/uniq";
+      uuid = "${pkgs.libossp_uuid}/bin/uuid";
+      yq = "${pkgs.yq-go}/bin/yq";
+      y2j = "${pkgs.remarshal}/bin/yaml2json";
 
-    ## nix
-    _nix = pkgs.nixVersions.nix_2_22;
-    cachix = "${pkgs.cachix}/bin/cachix";
-    nixpkgs-fmt = "${pkgs.nixpkgs-fmt}/bin/nixpkgs-fmt";
-    nixfmt = "${pkgs.nixfmt-rfc-style}/bin/nixfmt";
+      ## nix
+      _nix = pkgs.nixVersions.nix_2_22;
+      cachix = "${pkgs.cachix}/bin/cachix";
+      nixpkgs-fmt = "${pkgs.nixpkgs-fmt}/bin/nixpkgs-fmt";
+      nixfmt = "${pkgs.nixfmt-rfc-style}/bin/nixfmt";
 
-    ## common
-    ls = "${core}/ls";
-    date = "${core}/date";
-    find = "${pkgs.findutils}/bin/find";
-    xargs = "${pkgs.findutils}/bin/xargs";
-    getopt = "${pkgs.getopt}/bin/getopt";
-    fzf = "${pkgs.fzf}/bin/fzf";
-    sox = "${pkgs.sox}/bin/play";
-    ffmpeg = "${pkgs.ffmpeg-full}/bin/ffmpeg";
-    ssh = "${pkgs.openssh}/bin/ssh";
-    which = "${pkgs.which}/bin/which";
+      ## common
+      ls = "${core}/ls";
+      date = "${core}/date";
+      find = "${pkgs.findutils}/bin/find";
+      xargs = "${pkgs.findutils}/bin/xargs";
+      getopt = "${pkgs.getopt}/bin/getopt";
+      fzf = "${pkgs.fzf}/bin/fzf";
+      sox = "${pkgs.sox}/bin/play";
+      ffmpeg = "${pkgs.ffmpeg-full}/bin/ffmpeg";
+      ssh = "${pkgs.openssh}/bin/ssh";
+      which = "${pkgs.which}/bin/which";
 
-    ## containers
-    d = "${pkgs.docker-client}/bin/docker";
-    k = "${pkgs.kubectl}/bin/kubectl";
+      ## containers
+      d = "${pkgs.docker-client}/bin/docker";
+      k = "${pkgs.kubectl}/bin/kubectl";
 
-    ## clouds
-    aws = "${pkgs.awscli2}/bin/aws";
-    gcloud = "${pkgs.google-cloud-sdk}/bin/gcloud";
+      ## clouds
+      aws = "${pkgs.awscli2}/bin/aws";
+      gcloud = "${pkgs.google-cloud-sdk}/bin/gcloud";
 
-    # fzf partials
-    fzfq = ''${fzf} -q "$1" --no-sort --header-first --reverse'';
-    fzfqm = ''${fzfq} -m'';
+      # fzf partials
+      fzfq = ''${fzf} -q "$1" --no-sort --header-first --reverse'';
+      fzfqm = ''${fzfq} -m'';
 
-    # ssh partials
-    _ssh = {
-      hosts = ''${_.grep} '^Host' ~/.ssh/config ~/.ssh/config.d/* 2>/dev/null | ${_.grep} -v '[?*]' | ${_.cut} -d ' ' -f 2- | ${_.sort} -u'';
-    };
-
-    # docker partials
-    docker = {
-      di = "${d} images";
-      da = "${d} ps -a";
-      get_image = "${awk} '{ print $3 }'";
-      get_container = "${awk} '{ print $1 }'";
-    };
-
-    # k8s partials
-    k8s = {
-      ka = "${k} get pods | ${sed} '1d'";
-      get_id = "${awk} '{ print $1 }'";
-      fmt = rec {
-        _fmt =
-          let
-            parseCol = col: "${col.k}:${col.v}";
-          in
-          columns: "-o custom-columns='${concatStringsSep "," (map parseCol columns)}'";
-        _cols = {
-          name = { k = "NAME"; v = ".metadata.name"; };
-          namespace = { k = "NAMESPACE"; v = ".metadata.namespace"; };
-          ready = { k = "READY"; v = ''status.conditions[?(@.type=="Ready")].status''; };
-          status = { k = "STATUS"; v = ".status.phase"; };
-          ip = { k = "IP"; v = ".status.podIP"; };
-          node = { k = "NODE"; v = ".spec.nodeName"; };
-          image = { k = "IMAGE"; v = ".spec.containers[*].image"; };
-          host_ip = { k = "HOST_IP"; v = ".status.hostIP"; };
-          start_time = { k = "START_TIME"; v = ".status.startTime"; };
-        };
-        pod = _fmt (with _cols; [
-          name
-          namespace
-          ready
-          status
-          ip
-          node
-          image
-        ]);
+      # ssh partials
+      _ssh = {
+        hosts = ''${_.grep} '^Host' ~/.ssh/config ~/.ssh/config.d/* 2>/dev/null | ${_.grep} -v '[?*]' | ${_.cut} -d ' ' -f 2- | ${_.sort} -u'';
       };
-    };
 
-    # json partials
-    refresh_patch = ''
-      echo "spec.template.metadata.labels.date = \"$(${_.date} +'%s')\";" |
-        ${_.gron} -u |
-        ${_.tr} -d '\n' |
-        ${_.sed} -E 's#\s+##g'
-    '';
-
-    # flags to reuse
-    flags = {
-      aws = {
-        region = {
-          name = "region";
-          default = "us-east-1";
-          description = "the AWS region in which to do this operation";
-          argument = "REGION";
-          envVar = "AWS_REGION";
-          completion = ''echo -e '${concatStringsSep "\\n" _.globals.aws.regions}' '';
-        };
-      };
-      gcp = {
-        project = {
-          name = "project";
-          description = "the GCP project in which to do this operation";
-          argument = "PROJECT_ID";
-          completion = ''${_.gcloud} projects list | ${_.sed} '1d' | ${_.awk} '{print $1}' '';
-        };
-      };
-      k8s = {
-        all_namespaces = {
-          name = "all_namespaces";
-          short = "A";
-          description = "operate across all namespaces";
-          bool = true;
-        };
-        namespace = {
-          name = "namespace";
-          default = "default";
-          description = "the namespace in which to do this operation";
-          argument = "NAMESPACE";
-          completion = ''${_.k} get ns | ${_.sed} '1d' | ${_.awk} '{print $1}' '';
-        };
-        nodes = {
-          name = "nodes";
-          description = "the node(s) on which to perform this operation";
-          argument = "NODES";
-          completion = ''${_.k} get nodes -o wide | ${_.sed} '1d' | ${_.awk} '{print $1}' '';
-          prompt = ''
-            ${_.k} get nodes -o wide |
-              ${_.fzfqm} --header-lines=1 |
-              ${_.k8s.get_id}
-          '';
-          promptError = "you must specify one or more nodes!";
-        };
-        serviceaccount = {
-          name = "serviceaccount";
-          description = "the service account to use for the workload";
-          argument = "SERVICE_ACCOUNT";
-          default = "default";
-          completion = ''${_.k} get sa -o=jsonpath='{range .items[*].metadata.name}{@}{"\n"}{end}' '';
-        };
-      };
+      # docker partials
       docker = {
-        image = {
-          name = "image";
-          description = "the docker image to use";
-          argument = "IMAGE";
-          prompt = ''
-            echo -e "${globals.hacks.docker.default_images}\n$(${globals.hacks.docker.get_local_images})" |
-              ${_.sort} -u |
-              ${_.fzfq} --header "IMAGE"'';
-          promptError = "you must specify a docker image!";
-          completion = ''
-            echo -e "${globals.hacks.docker.default_images}\n$(${globals.hacks.docker.get_local_images})" |
-              ${_.sort} -u
-          '';
-        };
+        di = "${d} images";
+        da = "${d} ps -a";
+        get_image = "${awk} '{ print $3 }'";
+        get_container = "${awk} '{ print $1 }'";
       };
-      common = {
-        force = {
-          name = "force";
-          bool = true;
-          description = "forcefully do this thing";
-        };
-        color = {
-          name = "color";
-          description = "the bash color/style to use [${bashColorsList}]";
-          argument = "COLOR";
-          default = "green";
-          completion = ''echo "${bashColorsList} ${toUpper bashColorsList}"'';
-        };
-      };
-      github = {
-        owner = {
-          name = "owner";
-          description = "the github user or organization that owns the repo";
-          required = true;
-        };
-        repo = {
-          name = "repo";
-          description = "the github repo to pull tags from";
-          required = true;
-        };
-      };
-      nix = {
-        overmind = {
-          name = "overmind";
-          short = "o";
-          bool = true;
-          description = "include an overmind config";
-        };
-      };
-      python = {
-        package = {
-          name = "package";
-        };
-        version = {
-          name = "version";
-          short = "r";
-        };
-      };
-      ssh = {
-        host = {
-          name = "host";
-          short = "H";
-          description = "the ssh host to use";
-          completion = _._ssh.hosts;
-          prompt = ''${_._ssh.hosts} | ${_.fzfq} --header "HOST"'';
-          promptError = "you must specify a ssh host!";
-        };
-      };
-    };
-    globals = {
-      hacks = {
-        bash_or_sh = "if command -v bash >/dev/null 2>/dev/null; then exec bash; else exec sh; fi";
-        docker = {
-          default_images = concatStringsSep "\\n" _.globals.images;
-          get_local_images = ''
-            docker image ls --format "{{.Repository}}:{{.Tag}}" 2>/dev/null |
-              ${_.grep} -v '<none>' |
-              ${_.sort} -u
-          '';
+
+      # k8s partials
+      k8s = {
+        ka = "${k} get pods | ${sed} '1d'";
+        get_id = "${awk} '{ print $1 }'";
+        fmt = rec {
+          _fmt =
+            let
+              parseCol = col: "${col.k}:${col.v}";
+            in
+            columns: "-o custom-columns='${concatStringsSep "," (map parseCol columns)}'";
+          _cols = {
+            name = { k = "NAME"; v = ".metadata.name"; };
+            namespace = { k = "NAMESPACE"; v = ".metadata.namespace"; };
+            ready = { k = "READY"; v = ''status.conditions[?(@.type=="Ready")].status''; };
+            status = { k = "STATUS"; v = ".status.phase"; };
+            ip = { k = "IP"; v = ".status.podIP"; };
+            node = { k = "NODE"; v = ".spec.nodeName"; };
+            image = { k = "IMAGE"; v = ".spec.containers[*].image"; };
+            host_ip = { k = "HOST_IP"; v = ".status.hostIP"; };
+            start_time = { k = "START_TIME"; v = ".status.startTime"; };
+          };
+          pod = _fmt (with _cols; [
+            name
+            namespace
+            ready
+            status
+            ip
+            node
+            image
+          ]);
         };
       };
 
-      # docker images to use in various spots
-      images = [
-        "alpine:3.20"
-        "ubuntu:24.04"
-        "almalinux:8.10"
-        "ghcr.io/jpetrucciani/foundry-nix:latest"
-        "ghcr.io/jpetrucciani/python-3.11:latest"
-        "ghcr.io/jpetrucciani/python-3.12:latest"
-        "ghcr.io/jpetrucciani/k8s-aws:latest"
-        "ghcr.io/jpetrucciani/k8s-gcp:latest"
-        "node:20"
-        "node:22"
-        "python:3.11"
-        "python:3.12"
-        "nicolaka/netshoot:latest"
-      ];
-      aws = {
-        regions = [
-          "us-east-1"
-          "us-east-2"
-          "us-west-1"
-          "us-west-2"
-          "us-gov-west-1"
-          "ca-central-1"
-          "eu-west-1"
-          "eu-west-2"
-          "eu-central-1"
-          "ap-southeast-1"
-          "ap-southeast-2"
-          "ap-south-1"
-          "ap-northeast-1"
-          "ap-northeast-2"
-          "sa-east-1"
-          "cn-north-1"
-        ];
+      # json partials
+      refresh_patch = ''
+        echo "spec.template.metadata.labels.date = \"$(${_.date} +'%s')\";" |
+          ${_.gron} -u |
+          ${_.tr} -d '\n' |
+          ${_.sed} -E 's#\s+##g'
+      '';
+
+      # flags to reuse
+      flags = {
+        aws = {
+          region = {
+            name = "region";
+            default = "us-east-1";
+            description = "the AWS region in which to do this operation";
+            argument = "REGION";
+            envVar = "AWS_REGION";
+            completion = ''echo -e '${concatStringsSep "\\n" _.globals.aws.regions}' '';
+          };
+        };
+        gcp = {
+          project = {
+            name = "project";
+            description = "the GCP project in which to do this operation";
+            argument = "PROJECT_ID";
+            completion = ''${_.gcloud} projects list | ${_.sed} '1d' | ${_.awk} '{print $1}' '';
+          };
+        };
+        k8s = {
+          all_namespaces = {
+            name = "all_namespaces";
+            short = "A";
+            description = "operate across all namespaces";
+            bool = true;
+          };
+          namespace = {
+            name = "namespace";
+            default = "default";
+            description = "the namespace in which to do this operation";
+            argument = "NAMESPACE";
+            completion = ''${_.k} get ns | ${_.sed} '1d' | ${_.awk} '{print $1}' '';
+          };
+          nodes = {
+            name = "nodes";
+            description = "the node(s) on which to perform this operation";
+            argument = "NODES";
+            completion = ''${_.k} get nodes -o wide | ${_.sed} '1d' | ${_.awk} '{print $1}' '';
+            prompt = ''
+              ${_.k} get nodes -o wide |
+                ${_.fzfqm} --header-lines=1 |
+                ${_.k8s.get_id}
+            '';
+            promptError = "you must specify one or more nodes!";
+          };
+          serviceaccount = {
+            name = "serviceaccount";
+            description = "the service account to use for the workload";
+            argument = "SERVICE_ACCOUNT";
+            default = "default";
+            completion = ''${_.k} get sa -o=jsonpath='{range .items[*].metadata.name}{@}{"\n"}{end}' '';
+          };
+        };
+        docker = {
+          image = {
+            name = "image";
+            description = "the docker image to use";
+            argument = "IMAGE";
+            prompt = ''
+              echo -e "${globals.hacks.docker.default_images}\n$(${globals.hacks.docker.get_local_images})" |
+                ${_.sort} -u |
+                ${_.fzfq} --header "IMAGE"'';
+            promptError = "you must specify a docker image!";
+            completion = ''
+              echo -e "${globals.hacks.docker.default_images}\n$(${globals.hacks.docker.get_local_images})" |
+                ${_.sort} -u
+            '';
+          };
+        };
+        common = {
+          force = {
+            name = "force";
+            bool = true;
+            description = "forcefully do this thing";
+          };
+          color = {
+            name = "color";
+            description = "the bash color/style to use [${bashColorsList}]";
+            argument = "COLOR";
+            default = "green";
+            completion = ''echo "${bashColorsList} ${toUpper bashColorsList}"'';
+          };
+        };
+        github = {
+          owner = {
+            name = "owner";
+            description = "the github user or organization that owns the repo";
+            required = true;
+          };
+          repo = {
+            name = "repo";
+            description = "the github repo to pull tags from";
+            required = true;
+          };
+        };
+        nix = {
+          overmind = {
+            name = "overmind";
+            short = "o";
+            bool = true;
+            description = "include an overmind config";
+          };
+        };
+        python = {
+          package = {
+            name = "package";
+          };
+          version = {
+            name = "version";
+            short = "r";
+          };
+        };
+        ssh = {
+          host = {
+            name = "host";
+            short = "H";
+            description = "the ssh host to use";
+            completion = _._ssh.hosts;
+            prompt = ''${_._ssh.hosts} | ${_.fzfq} --header "HOST"'';
+            promptError = "you must specify a ssh host!";
+          };
+        };
       };
-      gcp = {
-        regions = [
-          "asia-east1"
-          "asia-east2"
-          "asia-northeast1"
-          "asia-northeast2"
-          "asia-northeast3"
-          "asia-south1"
-          "asia-south2"
-          "asia-southeast1"
-          "asia-southeast2"
-          "australia-southeast1"
-          "australia-southeast2"
-          "europe-central2"
-          "europe-north1"
-          "europe-west1"
-          "europe-west2"
-          "europe-west3"
-          "europe-west4"
-          "europe-west6"
-          "northamerica-northeast1"
-          "northamerica-northeast2"
-          "southamerica-east1"
-          "southamerica-west1"
-          "us-central1"
-          "us-east1"
-          "us-east4"
-          "us-west1"
-          "us-west2"
-          "us-west3"
-          "us-west4"
+      globals = {
+        hacks = {
+          bash_or_sh = "if command -v bash >/dev/null 2>/dev/null; then exec bash; else exec sh; fi";
+          docker = {
+            default_images = concatStringsSep "\\n" _.globals.images;
+            get_local_images = ''
+              docker image ls --format "{{.Repository}}:{{.Tag}}" 2>/dev/null |
+                ${_.grep} -v '<none>' |
+                ${_.sort} -u
+            '';
+          };
+        };
+
+        # docker images to use in various spots
+        images = [
+          "alpine:3.20"
+          "ubuntu:24.04"
+          "almalinux:8.10"
+          "ghcr.io/jpetrucciani/foundry-nix:latest"
+          "ghcr.io/jpetrucciani/python-3.11:latest"
+          "ghcr.io/jpetrucciani/python-3.12:latest"
+          "ghcr.io/jpetrucciani/k8s-aws:latest"
+          "ghcr.io/jpetrucciani/k8s-gcp:latest"
+          "node:20"
+          "node:22"
+          "python:3.11"
+          "python:3.12"
+          "nicolaka/netshoot:latest"
         ];
-      };
-      tencent = {
-        regions = [
-          "ap-guangzhou"
-          "ap-shanghai"
-          "ap-nanjing"
-          "ap-beijing"
-          "ap-chengdu"
-          "ap-chongqing"
-          "ap-hongkong"
-          "ap-singapore"
-          "ap-jakarta"
-          "ap-seoul"
-          "ap-tokyo"
-          "ap-mumbai"
-          "ap-bangkok"
-          "na-toronto"
-          "sa-saopaulo"
-          "na-siliconvalley"
-          "na-ashburn"
-          "eu-frankfurt"
-          "eu-moscow"
-        ];
+        aws = {
+          regions = [
+            "us-east-1"
+            "us-east-2"
+            "us-west-1"
+            "us-west-2"
+            "us-gov-west-1"
+            "ca-central-1"
+            "eu-west-1"
+            "eu-west-2"
+            "eu-central-1"
+            "ap-southeast-1"
+            "ap-southeast-2"
+            "ap-south-1"
+            "ap-northeast-1"
+            "ap-northeast-2"
+            "sa-east-1"
+            "cn-north-1"
+          ];
+        };
+        gcp = {
+          regions = [
+            "asia-east1"
+            "asia-east2"
+            "asia-northeast1"
+            "asia-northeast2"
+            "asia-northeast3"
+            "asia-south1"
+            "asia-south2"
+            "asia-southeast1"
+            "asia-southeast2"
+            "australia-southeast1"
+            "australia-southeast2"
+            "europe-central2"
+            "europe-north1"
+            "europe-west1"
+            "europe-west2"
+            "europe-west3"
+            "europe-west4"
+            "europe-west6"
+            "northamerica-northeast1"
+            "northamerica-northeast2"
+            "southamerica-east1"
+            "southamerica-west1"
+            "us-central1"
+            "us-east1"
+            "us-east4"
+            "us-west1"
+            "us-west2"
+            "us-west3"
+            "us-west4"
+          ];
+        };
+        tencent = {
+          regions = [
+            "ap-guangzhou"
+            "ap-shanghai"
+            "ap-nanjing"
+            "ap-beijing"
+            "ap-chengdu"
+            "ap-chongqing"
+            "ap-hongkong"
+            "ap-singapore"
+            "ap-jakarta"
+            "ap-seoul"
+            "ap-tokyo"
+            "ap-mumbai"
+            "ap-bangkok"
+            "na-toronto"
+            "sa-saopaulo"
+            "na-siliconvalley"
+            "na-ashburn"
+            "eu-frankfurt"
+            "eu-moscow"
+          ];
+        };
       };
     };
-  };
 
   writeBashBinChecked = name: text:
     pkgs.stdenv.mkDerivation {
