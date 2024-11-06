@@ -58,8 +58,8 @@ in
           -l "${flag.name}" \
           -s "${flag.short}" \
           -d "${flag.description}" \
-          ${if flag.required then "-r" else ""} \
-          ${if flag.hasCompletion then ''-fa "(${flag.completion})"'' else "-F"}
+          ${if flag.hasCompletion then ''-fa "(${flag.completion})"'' else "-F"} \
+          ${if flag.required then "-r" else ""}
       '';
     in
     pkgs.writeScript "completion.fish"
