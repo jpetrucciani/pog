@@ -9,46 +9,59 @@
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { nixpkgs, flake-utils, ... }:
-    flake-utils.lib.eachDefaultSystem (system:
-      let
-        pkgs = nixpkgs.legacyPackages.${system};
-        pog = import ./. {
-          inherit pkgs system;
-        };
-        params = {
-          inherit pkgs;
-          inherit (pog) _ pog;
-        };
-        builtin = import ./builtin params;
-      in
-      rec {
-        overlays.default = final: prev: { inherit pog; };
-        packages = { inherit pog builtin; };
-        defaultPackage = packages.pog;
-
-        devShells = {
-          default = pkgs.mkShell {
-            nativeBuildInputs = with pkgs; [
-              bun
-              deadnix
-              nixpkgs-fmt
-              statix
-            ] ++ [
-              (pog.pog {
-                name = "docs";
-                script = ''
-                  ${pkgs.bun}/bin/bunx vitepress dev docs --host 0.0.0.0 "$@"
-                '';
-              })
-              (pog.pog {
-                name = "build_docs";
-                script = ''
-                  ${pkgs.bun}/bin/bunx vitepress build docs "$@"
-                '';
-              })
-            ];
+  outputs =
+    { nixpkgs, flake-utils, ... }:
+    flake-utils.lib.eachDefaultSystem
+      (
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+          pog = import ./. {
+            inherit pkgs system;
           };
-        };
-      });
+          params = {
+            inherit pkgs;
+            inherit (pog) _ pog;
+          };
+          builtin = import ./builtin params;
+        in
+        rec {
+          packages = {
+            inherit pog builtin;
+          };
+          defaultPackage = packages.pog;
+
+          devShells = {
+            default = pkgs.mkShell {
+              nativeBuildInputs =
+                with pkgs;
+                [
+                  bun
+                  deadnix
+                  nixpkgs-fmt
+                  statix
+                ]
+                ++ [
+                  (pog.pog {
+                    name = "docs";
+                    script = ''
+                      ${pkgs.bun}/bin/bunx vitepress dev docs --host 0.0.0.0 "$@"
+                    '';
+                  })
+                  (pog.pog {
+                    name = "build_docs";
+                    script = ''
+                      ${pkgs.bun}/bin/bunx vitepress build docs "$@"
+                    '';
+                  })
+                ];
+            };
+          };
+
+          formatter = pkgs.nixpkgs-fmt;
+        }
+      )
+    // {
+      overlays.default = final: prev: { pog = import ./. { pkgs = prev; }; };
+    };
 }
