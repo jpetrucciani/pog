@@ -265,9 +265,9 @@ rec {
 
       # docker images to use in various spots
       images = [
-        "alpine:3.20"
+        "alpine:3.21"
         "ubuntu:24.04"
-        "almalinux:8.10"
+        "almalinux:9.5"
         "ghcr.io/jpetrucciani/foundry-nix:latest"
         "ghcr.io/jpetrucciani/python-3.11:latest"
         "ghcr.io/jpetrucciani/python-3.12:latest"
@@ -277,6 +277,7 @@ rec {
         "node:22"
         "python:3.11"
         "python:3.12"
+        "python:3.13"
         "nicolaka/netshoot:latest"
       ];
       aws = {
