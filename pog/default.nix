@@ -1,12 +1,17 @@
 { pkgs, ... }:
 let
-  inherit (builtins) concatStringsSep filter isString replaceStrings split stringLength substring;
+  inherit (builtins) filter genList isString replaceStrings split stringLength substring;
   inherit (pkgs.lib) stringToCharacters;
   inherit (pkgs.lib.lists) reverseList;
-  inherit (pkgs.lib.strings) fixedWidthString toUpper;
+  inherit (pkgs.lib.strings) concatStrings concatStringsSep fixedWidthString toUpper;
   reverse = x: concatStringsSep "" (reverseList (stringToCharacters x));
   rightPad = num: text: reverse (fixedWidthString num " " (reverse text));
-  ind = text: concatStringsSep "\n" (map (x: "  ${x}") (filter isString (split "\n" text)));
+  _ind = level: text:
+    let
+      spaces = concatStrings (genList (_: " ") (level * 2));
+    in
+    concatStringsSep "\n" (map (x: "${spaces}${x}") (filter isString (split "\n" text)));
+  ind = _ind 1;
 
   bashbible = import ./bashbible.nix { inherit pkgs; };
 in
@@ -268,7 +273,7 @@ rec {
         "alpine:3.21"
         "ubuntu:24.04"
         "almalinux:9.5"
-        "ghcr.io/jpetrucciani/foundry-nix:latest"
+        "ghcr.io/jpetrucciani/nix:latest"
         "ghcr.io/jpetrucciani/python-3.11:latest"
         "ghcr.io/jpetrucciani/python-3.12:latest"
         "ghcr.io/jpetrucciani/k8s-aws:latest"
@@ -637,7 +642,7 @@ rec {
                 NO_COLOR=1
                 shift
                 ;;
-        ${ind (ind (concatStringsSep "\n" (map (x: x.definition) parsedFlags)))}
+        ${_ind 2 (concatStringsSep "\n" (map (x: x.definition) parsedFlags))}
             --)
                 shift
                 break
