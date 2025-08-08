@@ -270,19 +270,20 @@ rec {
 
       # docker images to use in various spots
       images = [
-        "alpine:3.21"
+        "alpine:3.22"
         "ubuntu:24.04"
-        "almalinux:9.5"
+        "almalinux:9.6"
+        "almalinux:10.0"
         "ghcr.io/jpetrucciani/nix:latest"
-        "ghcr.io/jpetrucciani/python-3.11:latest"
-        "ghcr.io/jpetrucciani/python-3.12:latest"
+        "ghcr.io/jpetrucciani/python-3.13:latest"
         "ghcr.io/jpetrucciani/k8s-aws:latest"
         "ghcr.io/jpetrucciani/k8s-gcp:latest"
-        "node:20"
         "node:22"
+        "node:24"
         "python:3.11"
         "python:3.12"
         "python:3.13"
+        "ruby:3.4.5"
         "nicolaka/netshoot:latest"
       ];
       aws = {
