@@ -23,7 +23,7 @@ jobs:
       - uses: actions/configure-pages@v5
       - run: bun install
       - run: bun run docs:build
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v4
         with:
           path: docs/.vitepress/dist
   deploy:
