@@ -708,6 +708,7 @@ rec {
                 ${if shortDefaultFlags then "-h -v " else ""}${concatStringsSep " " (map (x: "-${x.short}") (filter (x: x.short != "") parsedFlags))} \
                 --help --verbose --no-color ${concatStringsSep " " (map (x: "--${x.name}") parsedFlags)}"
             }
+            # shellcheck disable=SC2329
             executables(){
               echo -n "$PATH" |
                 ${_.xargs} -d: -I{} -r -- find -L {} -maxdepth 1 -mindepth 1 -type f -executable -printf '%P\n' 2>/dev/null |
