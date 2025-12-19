@@ -86,7 +86,7 @@ rec {
     docker = {
       di = "${d} images";
       da = "${d} ps -a";
-      get_image = "${awk} '{ print $3 }'";
+      get_image = "${awk} '{ print $2 }'";
       get_container = "${awk} '{ print $1 }'";
     };
 
