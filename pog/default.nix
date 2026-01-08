@@ -14,6 +14,7 @@ let
   ind = _ind 1;
 
   bashbible = import ./bashbible.nix { inherit pkgs; };
+  ignoreUnused = "# shellcheck disable=SC2329";
 in
 rec {
   overlay = final: prev: { inherit pog; };
@@ -659,6 +660,7 @@ rec {
             echo -e "''${PURPLE}$1''${RESET}" >&2
           fi
         }
+        ${ignoreUnused}
         cleanup() {
           trap - SIGINT SIGTERM ERR EXIT
         ${ind beforeExit}
@@ -666,6 +668,7 @@ rec {
         trap cleanup SIGINT SIGTERM ERR EXIT
 
         ${concatStringsSep "\n" (map (x: ''
+          ${ignoreUnused}
           ${x.name}(){
             echo -e "''${${toUpper x.name}}$1''${RESET}"
           }

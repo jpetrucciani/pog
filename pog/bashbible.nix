@@ -2,7 +2,7 @@
 # https://github.com/dylanaraps/pure-bash-bible
 { pkgs, ... }:
 let
-  inherit (pkgs.lib) attrValues concatStrings;
+  inherit (pkgs.lib) attrValues concatStringsSep;
 in
 rec {
   functions = {
@@ -344,22 +344,27 @@ rec {
     };
   };
 
-  bible = ''
-    ## bash bible
-    ### strings
-    ${concatStrings (attrValues functions.strings)}
-    ### arrays
-    ${concatStrings (attrValues functions.arrays)}
-    ### files
-    ${concatStrings (attrValues functions.files)}
-    ### paths
-    ${concatStrings (attrValues functions.paths)}
-    ### terminal
-    ${concatStrings (attrValues functions.terminal)}
-    ### conversion
-    ${concatStrings (attrValues functions.conversion)}
-    ### other
-    ${concatStrings (attrValues functions.other)}
-    ## end bash bible
-  '';
+  bible =
+    let
+      sep = "# shellcheck disable=SC2329\n";
+      allFns = attrs: "${sep}${concatStringsSep sep (attrValues attrs)}";
+    in
+    ''
+      ## bash bible
+      ### strings
+      ${allFns functions.strings}
+      ### arrays
+      ${allFns functions.arrays}
+      ### files
+      ${allFns functions.files}
+      ### paths
+      ${allFns functions.paths}
+      ### terminal
+      ${allFns functions.terminal}
+      ### conversion
+      ${allFns functions.conversion}
+      ### other
+      ${allFns functions.other}
+      ## end bash bible
+    '';
 }
