@@ -655,6 +655,7 @@ rec {
                 ;;
           esac
         done
+        # shellcheck disable=SC2329
         debug() {
           if [ -n "$VERBOSE" ]; then
             echo -e "''${PURPLE}$1''${RESET}" >&2
@@ -674,6 +675,7 @@ rec {
           }
         '') bashColors)}
 
+        # shellcheck disable=SC2329
         die() {
           local msg=$1
           local code=''${2-1}
