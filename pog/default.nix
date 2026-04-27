@@ -84,12 +84,16 @@ rec {
     };
 
     # docker partials
-    docker = {
-      di = "${d} images";
-      da = "${d} ps -a";
-      get_image = "${awk} '{ print $2 }'";
-      get_container = "${awk} '{ print $1 }'";
-    };
+    docker =
+      let
+        tab = "--format table";
+      in
+      {
+        di = "${d} images ${tab}";
+        da = "${d} ps --all ${tab}";
+        get_image = "${awk} '{ print $2 }'";
+        get_container = "${awk} '{ print $1 }'";
+      };
 
     # k8s partials
     k8s = {
