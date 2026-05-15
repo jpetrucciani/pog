@@ -91,7 +91,7 @@ rec {
       {
         di = "${d} images ${tab}";
         da = "${d} ps --all ${tab}";
-        get_image = "${awk} '{ print $2 }'";
+        get_image = "${awk} '{ print $3 }'";
         get_container = "${awk} '{ print $1 }'";
       };
 
