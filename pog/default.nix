@@ -2,7 +2,7 @@
 let
   inherit (builtins) filter genList isString replaceStrings split stringLength substring;
   inherit (pkgs.lib) stringToCharacters;
-  inherit (pkgs.lib.lists) reverseList;
+  inherit (pkgs.lib.lists) concatLists reverseList;
   inherit (pkgs.lib.strings) concatStrings concatStringsSep fixedWidthString toUpper;
   reverse = x: concatStringsSep "" (reverseList (stringToCharacters x));
   rightPad = num: text: reverse (fixedWidthString num " " (reverse text));
@@ -560,12 +560,13 @@ rec {
   pogFn =
     { name
     , version ? "0.0.0"
-    , script
+    , script ? ""
     , description ? "a helpful bash script with flags, created through nix + pog!"
     , flags ? [ ]
     , parsedFlags ? map flag flags
     , arguments ? [ ]
     , argumentCompletion ? "files"
+    , commands ? [ ]
     , runtimeInputs ? [ ]
     , bashBible ? false
     , beforeExit ? ""
@@ -582,6 +583,259 @@ rec {
       shortHelpDoc = if shortDefaultFlags then "-h, " else "";
       shortVerboseDoc = if shortDefaultFlags then "-v, " else "";
       defaultFlagHelp = if showDefaultFlags then "[${shortHelp}--help] [${shortVerbose}--verbose] [--no-color] " else "";
+
+      # clap-style subcommands: when `commands` is non-empty the binary becomes a
+      # recursive dispatcher. each command node is the same shape as a pog call
+      # (name/description/flags/arguments/script) and may itself contain `commands`.
+      hasCommands = commands != [ ];
+      sanitize = replaceStrings [ "-" ] [ "_" ];
+      sanitizePath = p: concatStringsSep "__" (map sanitize p);
+
+      # build one tree node; reuses the exact per-flag outputs of `flag`
+      mkNode = path: spec:
+        let
+          nodePath = path ++ [ spec.name ];
+          nodeFlags = spec.parsedFlags or (map flag (spec.flags or [ ]));
+          children = spec.commands or [ ];
+          isParent = children != [ ];
+          nodeArgs = spec.arguments or [ ];
+          nodeDesc = spec.description or "a pog command";
+          rawScript = spec.script or "";
+          nodeScript = if builtins.isFunction rawScript then rawScript helpers else rawScript;
+          hasScript = nodeScript != "";
+          nodeBeforeExit = spec.beforeExit or "";
+          hasBeforeExit = nodeBeforeExit != "";
+          exitFn = "_pog_exit_" + sanitizePath nodePath;
+          # define this node's exit hook, and register it on entry so every command
+          # on the active path tears down (deepest first) when the process exits
+          exitFnDef =
+            if hasBeforeExit then ''
+              ${ignoreUnused}
+              ${exitFn}() {
+              ${_ind 1 nodeBeforeExit}
+              }
+            '' else "";
+          register = if hasBeforeExit then "_pog_cleanup_fns+=(${exitFn})" else "";
+          fnName = "_pog_cmd_" + sanitizePath nodePath;
+          helpFn = "_pog_help_" + sanitizePath nodePath;
+          pathStr = concatStringsSep " " nodePath;
+          childNodes = map (mkNode nodePath) children;
+          childFn = c: "_pog_cmd_" + sanitizePath (nodePath ++ [ c.name ]);
+          usageTail = if isParent then "<COMMAND>" else concatStringsSep " " (map toUpper nodeArgs);
+          childHelp = concatStringsSep "\n" (map (c: "${rightPad flagPadding c.name}\t${c.description or "a pog command"}") children);
+          dispatch = ''
+            case "''${1:-}" in
+            ${concatStringsSep "\n" (map (c: ''${c.name}) shift; ${childFn c} "$@" ;;'') children)}
+            "")
+            ${if hasScript then nodeScript else helpFn}
+            ;;
+            *)
+            die "unknown command: '$1'" 3
+            ;;
+            esac'';
+          body = if isParent then dispatch else nodeScript;
+          fnText = ''
+            ${exitFnDef}
+            ${ignoreUnused}
+            ${helpFn}() {
+              # help is a no-op meta action; drop the trap so no exit hooks fire
+              trap - SIGINT SIGTERM ERR EXIT
+              cat <<EOF
+              Usage: ${pathStr} ${defaultFlagHelp}${concatStringsSep " " (map (x: x.ex) nodeFlags)} ${usageTail}
+
+              ${nodeDesc}
+
+              Flags:
+            ${ind (concatStringsSep "\n" (map (x: x.helpDoc) nodeFlags))}
+              ${rightPad flagPadding "${shortHelpDoc}--help"}${"\t"}print this help and exit
+              ${rightPad flagPadding "${shortVerboseDoc}--verbose"}${"\t"}enable verbose logging and info
+              ${rightPad flagPadding "--no-color"}${"\t"}disable color and other formatting${if isParent then "\n\n  Commands:\n" + ind childHelp else ""}
+            EOF
+              exit 0
+            }
+            ${ignoreUnused}
+            ${fnName}() {
+              local OPTIONS LONGOPTS PARSED
+              OPTIONS="${if isParent then "+" else ""}${if shortDefaultFlags then "h,v," else ""}${concatStringsSep "," (map (x: x.shortOpt) nodeFlags)}"
+              LONGOPTS="help,no-color,verbose,${concatStringsSep "," (map (x: x.longOpt) nodeFlags)}"
+              # shellcheck disable=SC2251
+              ! PARSED=$(${_.getopt} --options=$OPTIONS --longoptions=$LONGOPTS --name "${spec.name}" -- "$@")
+              if [[ ''${PIPESTATUS[0]} -ne 0 ]]; then
+                exit 2
+              fi
+              eval set -- "$PARSED"
+              # shellcheck disable=SC2034
+            ${_ind 3 (concatStringsSep "\n" (map (x: x.flagDefault) nodeFlags))}
+              while true; do
+                case "$1" in
+                  ${shortHelp}--help)
+                    ${helpFn}
+                    ;;
+                  ${shortVerbose}--verbose)
+                    VERBOSE=1
+                    shift
+                    ;;
+                  --no-color)
+                    NO_COLOR=1
+                    shift
+                    ;;
+            ${_ind 5 (concatStringsSep "\n" (map (x: x.definition) nodeFlags))}
+                  --)
+                    shift
+                    break
+                    ;;
+                  *)
+                    echo "unknown flag passed"
+                    exit 3
+                    ;;
+                esac
+              done
+            ${_ind 3 register}
+            ${_ind 3 (concatStringsSep "\n" (filterBlank (map (x: x.flagPrompt) nodeFlags)))}
+            ${_ind 3 body}
+            }
+          '';
+          self = {
+            inherit fnName fnText pathStr isParent;
+            argComp = spec.argumentCompletion or "files";
+            childNames = map (c: c.name) children;
+            flagList = "${if shortDefaultFlags then "-h -v " else ""}${concatStringsSep " " (map (x: "-${x.short}") (filter (x: x.short != "") nodeFlags))} --help --verbose --no-color ${concatStringsSep " " (map (x: "--${x.name}") nodeFlags)}";
+            completionBlocks = concatStringsSep "\n" (map (x: x.completionBlock) nodeFlags);
+          };
+        in
+        self // { all = [ self ] ++ concatLists (map (n: n.all) childNodes); };
+
+      rootNode = mkNode [ ] {
+        inherit name description flags parsedFlags arguments argumentCompletion script commands beforeExit;
+      };
+      allNodes = rootNode.all;
+
+      commandsText = ''
+        # shellcheck disable=SC2317
+        ${if strict then "set -o errexit -o pipefail -o noclobber" else ""}
+        VERBOSE="''${POG_VERBOSE-}"
+        NO_COLOR="''${POG_NO_COLOR-}"
+        export PATH="${pkgs.lib.makeBinPath runtimeInputs}:$PATH"
+
+        setup_colors() {
+          if [[ -t 2 ]] && [[ -z "''$NO_COLOR" ]] && [[ "''$TERM" != "dumb" ]]; then
+            ${concatStringsSep " " (map (x: ''${toUpper x.name}="${x.code}"'') bashColors)}
+          else
+            ${concatStringsSep " " (map (x: ''${toUpper x.name}=""'') bashColors)}
+          fi
+        }
+        # shellcheck disable=SC2329
+        debug() {
+          if [ -n "$VERBOSE" ]; then
+            echo -e "''${PURPLE}$1''${RESET}" >&2
+          fi
+        }
+        # exit hooks registered (in path order) by each command on the active path;
+        # cleanup runs them in reverse so the deepest command tears down first
+        _pog_cleanup_fns=()
+        ${ignoreUnused}
+        cleanup() {
+          trap - SIGINT SIGTERM ERR EXIT
+          local _i
+          for (( _i = ''${#_pog_cleanup_fns[@]} - 1; _i >= 0; _i-- )); do
+            "''${_pog_cleanup_fns[_i]}"
+          done
+        }
+        trap cleanup SIGINT SIGTERM ERR EXIT
+
+        ${concatStringsSep "\n" (map (x: ''
+          ${ignoreUnused}
+          ${x.name}(){
+            echo -e "''${${toUpper x.name}}$1''${RESET}"
+          }
+        '') bashColors)}
+
+        # shellcheck disable=SC2329
+        die() {
+          local msg=$1
+          local code=''${2-1}
+          echo >&2 -e "''${RED}$msg''${RESET}"
+          exit "$code"
+        }
+        setup_colors
+        ${if bashBible then bashbible.bible else ""}
+        ${concatStringsSep "\n" (map (n: n.fnText) allNodes)}
+        ${rootNode.fnName} "$@"
+      '';
+
+      commandsCompletion =
+        let
+          childArm = n: ''["${n.pathStr}"]="${concatStringsSep " " n.childNames}"'';
+          flagArm = n: ''["${n.pathStr}"]="${n.flagList}"'';
+          valueArm = n: ''
+            "${n.pathStr}")
+            if [[ $current = -* ]]; then :
+            ${n.completionBlocks}
+            fi
+            ;;'';
+          argArm = n: ''
+            "${n.pathStr}")
+            completions=$(${n.argComp} "$current")
+            # shellcheck disable=SC2207
+            COMPREPLY=( $(compgen -W "$completions" -- "$current") )
+            ;;'';
+          customArgNodes = filter (n: !n.isParent && n.argComp != "files") allNodes;
+        in
+        ''
+          #!/bin/bash
+          # shellcheck disable=SC2317
+          _${name}()
+          {
+            # shellcheck disable=SC2034
+            local current previous completions node i word
+            declare -A _pog_children=(
+            ${_ind 3 (concatStringsSep "\n" (map childArm allNodes))}
+            )
+            declare -A _pog_flags=(
+            ${_ind 3 (concatStringsSep "\n" (map flagArm allNodes))}
+            )
+            COMPREPLY=()
+            current="''${COMP_WORDS[COMP_CWORD]}"
+            previous="''${COMP_WORDS[COMP_CWORD-1]}"
+
+            node="${name}"
+            for (( i=1; i<COMP_CWORD; i++ )); do
+              word="''${COMP_WORDS[i]}"
+              [[ $word == -* ]] && continue
+              if [[ " ''${_pog_children[$node]:-} " == *" $word "* ]]; then
+                node="$node $word"
+              fi
+            done
+
+            if [[ $current = -* ]]; then
+              # shellcheck disable=SC2207
+              COMPREPLY=( $(compgen -W "''${_pog_flags[$node]:-}" -- "$current") )
+              return 0
+            fi
+
+            case "$node" in
+            ${_ind 3 (concatStringsSep "\n" (map valueArm allNodes))}
+            esac
+            if [[ ''${#COMPREPLY[@]} -gt 0 ]]; then
+              return 0
+            fi
+
+            if [[ -n "''${_pog_children[$node]:-}" ]]; then
+              # shellcheck disable=SC2207
+              COMPREPLY=( $(compgen -W "''${_pog_children[$node]}" -- "$current") )
+            else
+              case "$node" in
+            ${_ind 3 (concatStringsSep "\n" (map argArm customArgNodes))}
+              *)
+                compopt -o default
+                COMPREPLY=()
+                ;;
+              esac
+            fi
+            return 0
+          }
+          complete -F _${name} ${name}
+        '';
     in
     pkgs.stdenv.mkDerivation {
       inherit version;
@@ -592,7 +846,7 @@ rec {
         "text"
         "completion"
       ];
-      text = ''
+      text = if hasCommands then commandsText else ''
         # shellcheck disable=SC2317
         ${if strict then "set -o errexit -o pipefail -o noclobber" else ""}
         VERBOSE="''${POG_VERBOSE-}"
@@ -692,7 +946,8 @@ rec {
         # script
         ${if builtins.isFunction script then script helpers else script}
       '';
-      completion =
+      completion = if hasCommands then commandsCompletion else
+      (
         let
           argCompletion =
             if argumentCompletion == "files" then ''
@@ -742,7 +997,8 @@ rec {
             return 0
           }
           complete -F _${name} ${name}
-        '';
+        ''
+      );
       installPhase = ''
         mkdir -p $out/bin
         echo '#!/bin/bash' >$out/bin/${name}
@@ -870,5 +1126,64 @@ rec {
       ${confirm {exit_code=69;}}
       die "this is a die" 0
     '';
+  };
+
+  # a tester for clap-style recursive subcommands
+  tool = pog {
+    name = "tool";
+    description = "a tester for pog's recursive subcommands";
+    flags = [ _.flags.common.color ];
+    # top-level exit hook (runs last, after any command's hook)
+    beforeExit = ''echo "[tool] root cleanup"'';
+    # default action when invoked with no subcommand
+    script = ''echo -e "''${!color}tool root - no subcommand given (color=$color)''${RESET}"'';
+    commands = [
+      {
+        name = "remote";
+        description = "manage remotes";
+        # parent default action (bare `tool remote`)
+        script = ''echo "listing remotes (default action)"'';
+        commands = [
+          {
+            name = "add";
+            description = "add a remote";
+            arguments = [ "remote_name" ];
+            # per-command exit hook (runs first, before the root hook)
+            beforeExit = ''echo "[tool remote add] cleanup"'';
+            flags = [
+              {
+                name = "url";
+                description = "the remote url";
+                required = true;
+              }
+              _.flags.k8s.namespace
+            ];
+            script = ''echo "adding remote '$1' -> $url (ns=$namespace)"'';
+          }
+          {
+            name = "remove";
+            description = "remove a remote";
+            script = ''echo "removing remote '$1'"'';
+          }
+          {
+            name = "list-all";
+            description = "list every remote (hyphenated command name)";
+            script = ''echo "listing all remotes"'';
+          }
+        ];
+      }
+      {
+        name = "status";
+        description = "show status";
+        flags = [
+          {
+            name = "short";
+            description = "short output";
+            bool = true;
+          }
+        ];
+        script = ''echo "status (short=''${short:-0})"'';
+      }
+    ];
   };
 }
