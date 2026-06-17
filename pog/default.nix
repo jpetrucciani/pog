@@ -796,6 +796,8 @@ rec {
             )
             COMPREPLY=()
             current="''${COMP_WORDS[COMP_CWORD]}"
+            # previous is only read by per-flag completion blocks; unused if no node has flags
+            # shellcheck disable=SC2034
             previous="''${COMP_WORDS[COMP_CWORD-1]}"
 
             node="${name}"
