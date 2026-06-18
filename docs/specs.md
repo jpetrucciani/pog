@@ -6,12 +6,13 @@
 pog =
     { name
     , version ? "0.0.0"
-    , script
+    , script ? ""
     , description ? "a helpful bash script with flags, created through nix + pog!"
     , flags ? [ ]
     , parsedFlags ? map flag flags
     , arguments ? [ ]
     , argumentCompletion ? "files"
+    , commands ? [ ]
     , runtimeInputs ? [ ]
     , bashBible ? false
     , beforeExit ? ""
@@ -20,6 +21,36 @@ pog =
     , showDefaultFlags ? false
     , shortDefaultFlags ? true
     }: {}
+```
+
+## subcommands (`commands`)
+
+Pass a list of `commands` to build a clap-style dispatcher (e.g. `tool remote add`).
+Each command has the same shape as a top-level `pog` call — `name`, `description`,
+`flags`, `arguments`, `script` — and may itself contain a nested `commands` list, so
+subcommands can nest to any depth.
+
+- A command with `commands` (a "parent") dispatches to its subcommands. If it also has a
+  `script`, that script runs as the **default action** when no subcommand is given;
+  otherwise bare invocation prints auto-generated help listing the subcommands.
+- Every command gets its own `--help`, flags, prompts, and tab completion.
+- `runtimeInputs` is set once at the top level and applies to all commands.
+- `beforeExit` is a per-command exit hook. Each command on the active path registers its
+  hook as it runs, and they fire in reverse (deepest command first, then its ancestors,
+  ending with the top-level `beforeExit`) when the process exits — including on errors and
+  prompt failures. `--help` is a no-op and fires no hooks.
+
+```nix
+{
+  name = "name-of-this-command";
+  description = "what this command does";  # optional
+  flags = [ ];                              # optional, same as the flag spec below
+  arguments = [ ];                          # optional, for leaf commands
+  argumentCompletion = "files";             # optional
+  script = "";                              # leaf action, or default action for a parent
+  beforeExit = "";                          # optional, this command's exit hook
+  commands = [ ];                           # optional, nest subcommands here
+}
 ```
 
 ## flag spec
