@@ -30,9 +30,12 @@ Each command has the same shape as a top-level `pog` call — `name`, `descripti
 `flags`, `arguments`, `script` — and may itself contain a nested `commands` list, so
 subcommands can nest to any depth.
 
-- A command with `commands` (a "parent") dispatches to its subcommands. If it also has a
-  `script`, that script runs as the **default action** when no subcommand is given;
-  otherwise bare invocation prints auto-generated help listing the subcommands.
+- A command with `commands` (a "parent") dispatches to its subcommands. When no subcommand
+  is given, bare invocation runs, in order of precedence: the parent's own `script` (default
+  action), or a subcommand marked `default = true` (the parent forwards to it), or — if
+  neither is set — auto-generated help listing the subcommands. Setting both a `script` and a
+  `default = true` subcommand on the same parent is an error. The forward chains, so a default
+  subcommand that is itself a parent with its own default keeps descending.
 - Every command gets its own `--help`, flags, prompts, and tab completion.
 - `runtimeInputs` is set once at the top level and applies to all commands.
 - `beforeExit` is a per-command exit hook. Each command on the active path registers its
@@ -48,6 +51,7 @@ subcommands can nest to any depth.
   arguments = [ ];                          # optional, for leaf commands
   argumentCompletion = "files";             # optional
   script = "";                              # leaf action, or default action for a parent
+  default = false;                          # optional, mark as the parent's default subcommand
   beforeExit = "";                          # optional, this command's exit hook
   commands = [ ];                           # optional, nest subcommands here
 }

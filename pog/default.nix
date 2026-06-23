@@ -621,13 +621,33 @@ rec {
           pathStr = concatStringsSep " " nodePath;
           childNodes = map (mkNode nodePath) children;
           childFn = c: "_pog_cmd_" + sanitizePath (nodePath ++ [ c.name ]);
+          # a child may mark itself `default = true`; bare invocation of this node
+          # then forwards to that child instead of running a script or printing help.
+          # the forward chains, so a default child that is itself a parent with its
+          # own default subcommand keeps descending.
+          defaultChildren = filter (c: c.default or false) children;
+          defaultChild =
+            if defaultChildren == [ ] then null
+            else if builtins.length defaultChildren > 1
+            then throw "pog: '${pathStr}' has more than one subcommand marked `default = true`"
+            else builtins.head defaultChildren;
+          hasDefaultChild = defaultChild != null;
           usageTail = if isParent then "<COMMAND>" else concatStringsSep " " (map toUpper nodeArgs);
-          childHelp = concatStringsSep "\n" (map (c: "${rightPad flagPadding c.name}\t${c.description or "a pog command"}") children);
+          childHelp = concatStringsSep "\n" (map (c: "${rightPad flagPadding c.name}\t${c.description or "a pog command"}${if (c.default or false) then " (default)" else ""}") children);
+          # what runs when this node is invoked bare (no subcommand). a node's own
+          # `script` and a default subcommand are both "bare action" behaviours, so
+          # allowing both would be ambiguous — reject it at eval time.
+          bareAction =
+            if hasScript && hasDefaultChild
+            then throw "pog: '${pathStr}' sets both a `script` and a `default = true` subcommand; pick one"
+            else if hasScript then nodeScript
+            else if hasDefaultChild then ''${childFn defaultChild} "$@"''
+            else helpFn;
           dispatch = ''
             case "''${1:-}" in
             ${concatStringsSep "\n" (map (c: ''${c.name}) shift; ${childFn c} "$@" ;;'') children)}
             "")
-            ${if hasScript then nodeScript else helpFn}
+            ${bareAction}
             ;;
             *)
             die "unknown command: '$1'" 3
@@ -1143,9 +1163,14 @@ rec {
       {
         name = "remote";
         description = "manage remotes";
-        # parent default action (bare `tool remote`)
-        script = ''echo "listing remotes (default action)"'';
         commands = [
+          {
+            name = "list";
+            description = "list remotes";
+            # bare `tool remote` forwards here instead of printing help
+            default = true;
+            script = ''echo "listing remotes (default subcommand)"'';
+          }
           {
             name = "add";
             description = "add a remote";
