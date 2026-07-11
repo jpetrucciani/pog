@@ -1,7 +1,7 @@
 { pkgs, ... }:
 let
-  inherit (builtins) filter genList isString replaceStrings split stringLength substring;
-  inherit (pkgs.lib) stringToCharacters;
+  inherit (builtins) filter genList isString replaceStrings stringLength substring;
+  inherit (pkgs.lib) stringToCharacters splitString;
   inherit (pkgs.lib.lists) concatLists reverseList;
   inherit (pkgs.lib.strings) concatStrings concatStringsSep fixedWidthString toUpper;
   reverse = x: concatStringsSep "" (reverseList (stringToCharacters x));
@@ -10,7 +10,7 @@ let
     let
       spaces = concatStrings (genList (_: " ") (level * 2));
     in
-    concatStringsSep "\n" (map (x: "${spaces}${x}") (filter isString (split "\n" text)));
+    concatStringsSep "\n" (map (x: "${spaces}${x}") (filter isString (splitString "\n" text)));
   ind = _ind 1;
 
   bashbible = import ./bashbible.nix { inherit pkgs; };
