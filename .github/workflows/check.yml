@@ -39,6 +39,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: cachix/install-nix-action@v31
+      - name: Allow unprivileged user namespaces
+        run: |
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
       - run: nix run .#test-portable-parity
       - name: Single-file app and wrapped companions
         run: |
@@ -84,6 +89,11 @@ jobs:
         with:
           name: portable-bundles-x86_64-linux
           path: portable-artifacts
+      - name: Allow unprivileged user namespaces
+        run: |
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
       - name: Run portable artifacts without Nix
         run: |
           test ! -e /nix
