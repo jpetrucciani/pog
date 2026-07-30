@@ -1,0 +1,73 @@
+diff --git a/main.cpp b/main.cpp
+index 505a4b9..906ad44 100644
+--- a/main.cpp
++++ b/main.cpp
+@@ -110,17 +110,28 @@ int main(int argc, char *argv[]) {
+   const char *t;
+ 
+-#define x(y) dirMappings.push_back({ "/" y, y })
+-  x("dev");
+-  x("proc");
+-  x("sys");
+-  x("run");
+-  x("tmp");
+-  x("var");
+-  x("etc");
+-  x("usr");
+-  x("home");
+-  x("root");
+-#undef x
++  DIR *hostRoot = opendir("/");
++  if (!hostRoot) {
++    err_exit("opendir(/)");
++  }
++  struct dirent *hostEntry;
++  while ((hostEntry = readdir(hostRoot))) {
++    if (strcmp(hostEntry->d_name, ".") == 0 ||
++        strcmp(hostEntry->d_name, "..") == 0 ||
++        strcmp(hostEntry->d_name, "nix") == 0) {
++      continue;
++    }
++    string hostPath = string("/") + hostEntry->d_name;
++    struct stat hostStat;
++    if (stat(hostPath.c_str(), &hostStat) < 0 ||
++        !S_ISDIR(hostStat.st_mode)) {
++      continue;
++    }
++    dirMappings.push_back({
++      hostPath,
++      hostEntry->d_name
++    });
++  }
++  closedir(hostRoot);
+ 
+   int opt;
+   while ((opt = getopt(argc, argv, "cen:m:dp:")) != -1) {
+@@ -218,6 +229,15 @@ static int child_proc(const char *rootdir, const char *nixdir, uint8_t clear_env
+   uid_t uid = getuid();
+   gid_t gid = getgid();
+ 
++  char hostCwd[PATH_MAX];
++  const char *cwd = getenv("POG_ORIGINAL_CWD");
++  if (!cwd) {
++    cwd = getcwd(hostCwd, sizeof(hostCwd));
++    if (!cwd) {
++      err_exit("getcwd()");
++    }
++  }
++
+   // "unshare" into new namespace
+   if (unshare(CLONE_NEWNS | CLONE_NEWUSER) < 0) {
+     if (errno == EPERM) {
+@@ -275,7 +295,10 @@ static int child_proc(const char *rootdir, const char *nixdir, uint8_t clear_env
+     err_exit("chroot(%s)", rootdir);
+   }
+ 
+-  chdir("/");
++  if (chdir(cwd) < 0) {
++    err_exit("chdir(%s)", cwd);
++  }
++  unsetenv("POG_ORIGINAL_CWD");
+ 
+   if (clear_env) clearenv();
+   setenv("PATH", ENV_PATH, 1);

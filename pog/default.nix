@@ -14,7 +14,14 @@ let
   ind = _ind 1;
 
   bashbible = import ./bashbible.nix { inherit pkgs; };
+  bundlers = import ./bundlers { inherit pkgs; };
   ignoreUnused = "# shellcheck disable=SC2329";
+  formatAndCheckBash = path: ''
+    shfmt -w -ln bash -i 2 -ci -sr "${path}"
+    bash -n "${path}"
+    shfmt -d -ln bash -i 2 -ci -sr "${path}"
+    shellcheck "${path}"
+  '';
 in
 rec {
   overlay = final: prev: { inherit pog; };
@@ -375,13 +382,17 @@ rec {
       inherit name text;
       dontUnpack = true;
       passAsFile = "text";
-      nativeBuildInputs = [ pkgs.pkgs.shellcheck ];
+      nativeBuildInputs = [
+        pkgs.bash
+        pkgs.shellcheck
+        pkgs.shfmt
+      ];
       installPhase = ''
         mkdir -p $out/bin
         echo '#!/bin/bash' > $out/bin/${name}
         cat $textPath >> $out/bin/${name}
         chmod +x $out/bin/${name}
-        shellcheck $out/bin/${name}
+        ${formatAndCheckBash "$out/bin/${name}"}
       '';
     };
 
@@ -488,6 +499,7 @@ rec {
 
   writeBashBinCheckedWithFlags = pog;
   pog = {
+    inherit (bundlers) toAppImage toArx toHostScript;
     helpers = rec {
       fn = {
         add = "${_.awk} '{print $1 + $2}'";
@@ -568,6 +580,7 @@ rec {
     , argumentCompletion ? "files"
     , commands ? [ ]
     , runtimeInputs ? [ ]
+    , hostCommands ? [ ]
     , bashBible ? false
     , beforeExit ? ""
     , strict ? false
@@ -660,7 +673,7 @@ rec {
             ${helpFn}() {
               # help is a no-op meta action; drop the trap so no exit hooks fire
               trap - SIGINT SIGTERM ERR EXIT
-              cat <<EOF
+              ${pkgs.coreutils}/bin/cat <<EOF
               Usage: ${pathStr} ${defaultFlagHelp}${concatStringsSep " " (map (x: x.ex) nodeFlags)} ${usageTail}
 
               ${nodeDesc}
@@ -719,7 +732,7 @@ rec {
             inherit fnName fnText pathStr isParent;
             argComp = spec.argumentCompletion or "files";
             childNames = map (c: c.name) children;
-            flagList = "${if shortDefaultFlags then "-h -v " else ""}${concatStringsSep " " (map (x: "-${x.short}") (filter (x: x.short != "") nodeFlags))} --help --verbose --no-color ${concatStringsSep " " (map (x: "--${x.name}") nodeFlags)}";
+            flagList = "${if shortDefaultFlags then "-h -v " else ""}${concatStringsSep " " (map (x: "-${x.short}") (filter (x: x.short != "") nodeFlags))} --help --verbose --no-color ${concatStringsSep " " (map (x: "--${x.cliName or x.name}") nodeFlags)}";
             completionBlocks = concatStringsSep "\n" (map (x: x.completionBlock) nodeFlags);
           };
         in
@@ -761,7 +774,15 @@ rec {
             "''${_pog_cleanup_fns[_i]}"
           done
         }
-        trap cleanup SIGINT SIGTERM ERR EXIT
+        ${ignoreUnused}
+        _pog_signal() {
+          local status=$1
+          cleanup
+          exit "$status"
+        }
+        trap '_pog_signal 130' SIGINT
+        trap '_pog_signal 143' SIGTERM
+        trap cleanup ERR EXIT
 
         ${concatStringsSep "\n" (map (x: ''
           ${ignoreUnused}
@@ -859,11 +880,16 @@ rec {
           complete -F _${name} ${name}
         '';
     in
-    pkgs.stdenv.mkDerivation {
+    pkgs.stdenv.mkDerivation (finalAttrs: {
       inherit version;
       pname = name;
       dontUnpack = true;
-      nativeBuildInputs = [ pkgs.installShellFiles pkgs.shellcheck ];
+      nativeBuildInputs = [
+        pkgs.bash
+        pkgs.installShellFiles
+        pkgs.shellcheck
+        pkgs.shfmt
+      ];
       passAsFile = [
         "text"
         "completion"
@@ -876,8 +902,8 @@ rec {
         export PATH="${pkgs.lib.makeBinPath runtimeInputs}:$PATH"
 
         help() {
-          cat <<EOF
-          Usage: ${name} ${defaultFlagHelp}${concatStringsSep " " (map (x: x.ex) parsedFlags)} ${concatStringsSep " " (map (x: toUpper x.name) arguments)}
+          ${pkgs.coreutils}/bin/cat <<EOF
+          Usage: ${name} ${defaultFlagHelp}${concatStringsSep " " (map (x: x.ex) parsedFlags)} ${concatStringsSep " " (map toUpper arguments)}
 
           ${description}
 
@@ -946,7 +972,15 @@ rec {
           trap - SIGINT SIGTERM ERR EXIT
         ${ind beforeExit}
         }
-        trap cleanup SIGINT SIGTERM ERR EXIT
+        ${ignoreUnused}
+        _pog_signal() {
+          local status=$1
+          cleanup
+          exit "$status"
+        }
+        trap '_pog_signal 130' SIGINT
+        trap '_pog_signal 143' SIGTERM
+        trap cleanup ERR EXIT
 
         ${concatStringsSep "\n" (map (x: ''
           ${ignoreUnused}
@@ -992,7 +1026,7 @@ rec {
             flags(){
               echo "\
                 ${if shortDefaultFlags then "-h -v " else ""}${concatStringsSep " " (map (x: "-${x.short}") (filter (x: x.short != "") parsedFlags))} \
-                --help --verbose --no-color ${concatStringsSep " " (map (x: "--${x.name}") parsedFlags)}"
+                --help --verbose --no-color ${concatStringsSep " " (map (x: "--${x.cliName or x.name}") parsedFlags)}"
             }
             # shellcheck disable=SC2329
             executables(){
@@ -1026,15 +1060,24 @@ rec {
         echo '#!/bin/bash' >$out/bin/${name}
         cat $textPath >>$out/bin/${name}
         chmod +x $out/bin/${name}
-        shellcheck $out/bin/${name}
-        shellcheck $completionPath
-        installShellCompletion --bash --name ${name} $completionPath
+        cp "$completionPath" completion.bash
+        ${formatAndCheckBash "$out/bin/${name}"}
+        ${formatAndCheckBash "completion.bash"}
+        installShellCompletion --bash --name ${name} completion.bash
       '';
+      passthru = {
+        pog = {
+          inherit hostCommands runtimeInputs;
+        };
+        toArx = pog.toArx finalAttrs.finalPackage;
+        toAppImage = pog.toAppImage finalAttrs.finalPackage;
+        toHostScript = pog.toHostScript finalAttrs.finalPackage;
+      };
       meta = {
         inherit description;
         mainProgram = name;
       };
-    };
+    });
 
   flag =
     { name
@@ -1058,19 +1101,20 @@ rec {
     , flagPadding ? 20
     }: {
       inherit short default bool marker description;
+      cliName = name;
       name = _name;
       shortOpt = "${short}${marker}";
-      longOpt = "${_name}${marker}";
+      longOpt = "${name}${marker}";
       flagDefault = ''${_name}="''${${envVar}:-${default}}"'';
       flagPrompt =
         if hasPrompt then ''
           [ -z "''${${_name}}" ] && ${_name}="$(${prompt})"
           [ -z "''${${_name}}" ] && die "${promptError}" ${toString promptErrorExitCode}
         '' else "";
-      ex = "[${shortDef}--${_name}${if bool then "" else " ${argument}"}]";
+      ex = "[${shortDef}--${name}${if bool then "" else " ${argument}"}]";
       helpDoc =
         let
-          base = (if short != "" then "-${short}, " else "") + "--${_name}";
+          base = (if short != "" then "-${short}, " else "") + "--${name}";
         in
         (rightPad flagPadding base) +
         "\t${description}" +
@@ -1079,13 +1123,13 @@ rec {
         "${if bool then " [bool]" else ""}"
       ;
       definition = ''
-        ${shortDef}--${_name})
+        ${shortDef}--${name})
             ${_name}=${if bool then "1" else "$2"}
             shift ${if bool then "" else "2"}
             ;;'';
       completionBlock =
         if hasCompletion then ''
-          elif [[ $previous = -${short} ]] || [[ $previous = --${_name} ]]; then
+          elif [[ $previous = -${short} ]] || [[ $previous = --${name} ]]; then
             # shellcheck disable=SC2116
             completions=$(${completion})
             # shellcheck disable=SC2207

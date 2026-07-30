@@ -53,7 +53,26 @@ rec {
       reverse_case = ''
         reverse_case() {
           # Usage: reverse_case "string"
-          printf '%s\n' "''${1~~}"
+          local character result=
+
+          for (( i = 0; i < ''${#1}; i++ )); do
+            character="''${1:i:1}"
+            case "$character" in
+              [[:lower:]])
+                  result+="''${character^^}"
+              ;;
+
+              [[:upper:]])
+                  result+="''${character,,}"
+              ;;
+
+              *)
+                  result+="$character"
+              ;;
+            esac
+          done
+
+          printf '%s\n' "$result"
         }
       '';
       trim_quotes = ''

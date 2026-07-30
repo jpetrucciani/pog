@@ -10,6 +10,9 @@ hero:
       text: Get Started
       link: /getting-started
     - theme: alt
+      text: Portable Outputs
+      link: /portable-outputs
+    - theme: alt
       text: View on GitHub
       link: https://github.com/jpetrucciani/pog
 
@@ -32,7 +35,28 @@ features:
   - icon: ⚡
     title: Quick Integration
     details: Easy to integrate with existing Nix projects through overlays or direct imports
+  - icon: 📦
+    title: Portable Distribution
+    details: Turn one pog definition into a host script, an Arx bundle, or an AppImage
+    link: /portable-outputs
+    linkText: Explore portable outputs
 ---
+
+### Define once, choose how to ship
+
+A normal `pog` package can also produce three opt-in, single-file outputs:
+
+| Output | Dependency model | Good fit |
+| --- | --- | --- |
+| `toHostScript` | Uses commands already installed on the host | Bootstrap scripts and managed fleets |
+| `toArx` | Carries the Nix closure inside an experimental Linux bundle | Internal tools that need exact Nix dependencies |
+| `toAppImage` | Carries the Nix closure inside an AppImage | Distributing a Linux CLI as one familiar artifact |
+
+The normal Nix package stays unchanged until one of these outputs is requested.
+Each format uses the same flags, commands, help, runtime inputs, and script
+definition.
+
+[See the portable outputs guide →](/portable-outputs)
 
 ### Quick Example
 

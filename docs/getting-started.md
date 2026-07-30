@@ -32,7 +32,7 @@ pog.pog {
 }
 ```
 
-or if you want to add it as an overlay to nixpkgs, you can add `pog.overlays.${system}.default` in your overlays for nixpkgs!
+Or add `pog.overlays.default` to your nixpkgs overlays.
 
 ### flake
 
@@ -45,10 +45,23 @@ or if you want to add it as an overlay to nixpkgs, you can add `pog.overlays.${s
   outputs = { self, nixpkgs, pog, ... }:
     let
       system = "x86_64-linux";
+      pkgs = import nixpkgs {
+        inherit system;
+        overlays = [ pog.overlays.default ];
+      };
+      meme = pkgs.pog.pog {
+        name = "meme";
+        script = ''echo meme'';
+      };
     in
     {
-      packages = nixpkgs { inherit system; overlays = [ pog.overlays.${system}.default ]; };
-      devShells.${system}.default = pkgs.mkShell {nativeBuildInputs = [(pkgs.pog.pog {name = "meme"; script= ''echo meme'';})];};
+      packages.${system}.default = meme;
+      devShells.${system}.default = pkgs.mkShell {
+        nativeBuildInputs = [ meme ];
+      };
     };
 }
 ```
+
+Once the ordinary package works, you can also export it as a host script, Arx
+bundle, or AppImage. See the [portable outputs guide](/portable-outputs).

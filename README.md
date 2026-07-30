@@ -58,7 +58,8 @@ pog.pog {
 }
 ```
 
-or if you want to add it as an overlay to nixpkgs, you can add `pog.overlays.${system}.default` in your overlays for nixpkgs!
+or if you want to add it as an overlay to nixpkgs, you can add
+`pog.overlays.default` to your nixpkgs overlays.
 
 using flakes:
 
@@ -71,13 +72,52 @@ using flakes:
   outputs = { self, nixpkgs, pog, ... }:
     let
       system = "x86_64-linux";
+      pkgs = import nixpkgs {
+        inherit system;
+        overlays = [ pog.overlays.default ];
+      };
     in
     {
-      packages = nixpkgs { inherit system; overlays = [ pog.overlays.${system}.default ]; };
       devShells.${system}.default = pkgs.mkShell {nativeBuildInputs = [(pkgs.pog.pog {name = "meme"; script= ''echo meme'';})];};
     };
 }
 ```
+
+## Testing
+
+Run every behavioral test, including the portable Arx and AppImage runtime
+checks, with:
+
+```console
+nix run .#test
+```
+
+For only the fast renderer, command, completion, and host-script checks, use:
+
+```console
+nix build .#test
+```
+
+Each focused check is also independently addressable, for example:
+
+```console
+nix build .#ordinary-flags
+nix build .#ordinary-commands
+nix build .#ordinary-completion
+nix build .#ordinary-bash-bible
+nix build .#host-negative
+```
+
+The closure bundles require a runtime smoke test outside the Nix build sandbox.
+To run only that suite, build all four formats and exercise the same behavior
+contract against the ordinary package, host script, Arx bundle, and AppImage:
+
+```console
+nix run .#test-portable-parity
+```
+
+CI runs the fast and portable suites as separate parallel jobs.
+`nix flake check` also includes the fast suite.
 
 ## API Reference
 
@@ -100,6 +140,7 @@ pog {
   arguments = [ ];              # Positional arguments
   argumentCompletion = "files"; # Completion for positional args
   runtimeInputs = [ ];          # Runtime dependencies
+  hostCommands = [ ];           # Extra host commands used by toHostScript
   bashBible = false;            # Include bash-bible helpers
   beforeExit = "";              # Code to run before exit
   strict = false;               # Enable strict bash mode
@@ -108,6 +149,96 @@ pog {
   shortDefaultFlags = true;     # Enable short versions of default flags
 }
 ```
+
+## Portable outputs
+
+Every generated tool exposes three optional output transformations. The
+transformer functions and derivation passthru attributes are equivalent:
+
+```nix
+let
+  tool = pog.pog {
+    name = "message";
+    runtimeInputs = [ pkgs.jq ];
+    script = ''
+      ${pkgs.jq}/bin/jq -r .message "$1"
+    '';
+  };
+in {
+  arx = tool.toArx;                 # same as pog.pog.toArx tool
+  appImage = tool.toAppImage;       # same as pog.pog.toAppImage tool
+  hostScript = tool.toHostScript;   # same as pog.pog.toHostScript tool
+  nixosAppImage = tool.toAppImage.wrapped;
+
+  # Single-file derivations are not conventional $out/bin packages. Use their
+  # app companions when exporting them through a flake's `apps` output.
+  apps.${pkgs.stdenv.hostPlatform.system}.message-arx = tool.toArx.app;
+  apps.${pkgs.stdenv.hostPlatform.system}.message-appimage = tool.toAppImage.app;
+  apps.${pkgs.stdenv.hostPlatform.system}.message-host = tool.toHostScript.app;
+}
+```
+
+The AppImage app companion and `.wrapped` derivation launch through Nixpkgs'
+`appimage-run`, making both suitable for `nix run` on NixOS. The app value is
+ready to export under `apps.<system>`. The wrapped derivation also works through
+nested package selectors such as:
+
+```console
+nix run .#pog.foo.toAppImage.wrapped
+```
+
+Neither convenience changes the raw, distributable `toAppImage` artifact.
+
+`toArx` and `toAppImage` produce single-file, architecture-specific Linux
+executables containing the tool's Nix closure. Both require Linux user
+namespaces at runtime. Bundling does not change the licenses or redistribution
+terms of anything in that closure; publishers must review every
+`runtimeInputs` dependency, especially unfree or non-redistributable packages.
+
+The output filenames are `<pname>-arx`, `<pname>.AppImage`, and
+`<pname>-host-script`. Actual sizes depend on the closure. The x86_64 test
+fixture containing Bash, `jq`, and their runtime libraries is approximately
+17.7 MB as Arx and 20.8 MB as AppImage.
+
+`toArx` is experimental. Its shared extraction cache lives under
+`$HOME/.cache/tmpx-<hash>`, and concurrent first execution can race while
+populating that cache. The launcher also needs the host commands listed in
+[`pog/bundlers/README.md`](pog/bundlers/README.md).
+
+Normal AppImage execution requires FUSE and `fusermount3`. Set
+`APPIMAGE_EXTRACT_AND_RUN=1` to use the runtime's extraction fallback when FUSE
+is unavailable. On NixOS, either use that fallback or run the artifact through
+`appimage-run`:
+
+```console
+APPIMAGE_EXTRACT_AND_RUN=1 ./message.AppImage
+nix run nixpkgs#appimage-run -- ./message.AppImage
+```
+
+`toHostScript` produces a Bash script with no Nix store references. Its header
+lists the commands that must be installed on the host, and it reports all
+missing commands before running. Exact executable references such as
+`${pkgs.jq}/bin/jq` are converted to `jq`. Other store references, such as data
+files under `${pkgs.foo}/share`, fail the host-script build rather than producing
+a partly portable artifact. The host script requires Bash 4 or newer and
+GNU-compatible `getopt`. It does not include the ordinary package's separately
+installed Bash completion file.
+
+The main program of each `runtimeInputs` package is included in the host
+dependency check. Use `hostCommands` for additional commands invoked by bare
+name:
+
+```nix
+hostCommands = [ "git" "ssh" ];
+```
+
+Command-name conversion does not change command semantics. Scripts using
+Nix-provided GNU tools such as `find` or `xargs` still require compatible GNU
+implementations on the host.
+
+Generated scripts and completions are formatted with
+`shfmt -ln bash -i 2 -ci -sr`, checked with `bash -n`, and linted with
+ShellCheck.
 
 ### Flag Definition
 
@@ -132,6 +263,10 @@ Flags are defined using the following schema:
   flagPadding = 20;           # Help text padding
 }
 ```
+
+Hyphens remain hyphens in CLI options. The generated Bash variable replaces
+them with underscores, so `name = "output-format"` produces
+`--output-format` and `$output_format`.
 
 ### Built-in Flag Features
 
