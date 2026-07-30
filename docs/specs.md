@@ -14,6 +14,7 @@ pog =
     , argumentCompletion ? "files"
     , commands ? [ ]
     , runtimeInputs ? [ ]
+    , hostCommands ? [ ]
     , bashBible ? false
     , beforeExit ? ""
     , strict ? false
@@ -22,6 +23,61 @@ pog =
     , shortDefaultFlags ? true
     }: {}
 ```
+
+## portable outputs
+
+See the [portable outputs guide](/portable-outputs) for complete flake examples,
+format selection, NixOS usage, CI patterns, and troubleshooting.
+
+Each result has lazy `toArx`, `toAppImage`, and `toHostScript` passthru
+derivations. The same transformations are available as functions on `pog`:
+
+```nix
+tool.toArx == pog.toArx tool
+tool.toAppImage == pog.toAppImage tool
+tool.toHostScript == pog.toHostScript tool
+```
+
+Each single-file derivation also exposes an app value for consumer flakes:
+
+```nix
+apps.${pkgs.stdenv.hostPlatform.system}.tool-arx = tool.toArx.app;
+apps.${pkgs.stdenv.hostPlatform.system}.tool-appimage = tool.toAppImage.app;
+apps.${pkgs.stdenv.hostPlatform.system}.tool-host = tool.toHostScript.app;
+```
+
+The AppImage app companion uses Nixpkgs' `appimage-run`; the underlying
+single-file derivation is unchanged.
+
+The AppImage also exposes a conventional wrapped derivation for direct nested
+`nix run` selectors on NixOS:
+
+```nix
+tool.toAppImage.wrapped
+```
+
+```console
+nix run .#pog.foo.toAppImage.wrapped
+```
+
+`toArx` and `toAppImage` are Linux-only, architecture-specific closure bundles.
+`toHostScript` removes exact executable store references, lists its host command
+dependencies in a generated header, checks for missing commands at startup, and
+rejects any remaining `/nix/store` reference. It requires Bash 4 or newer and
+GNU-compatible `getopt`; the single-file output does not carry the package's
+separate Bash completion file.
+
+The output filenames are `<pname>-arx`, `<pname>.AppImage`, and
+`<pname>-host-script`. Both closure bundles require Linux user namespaces.
+Normal AppImage mounting additionally requires FUSE and `fusermount3`;
+`APPIMAGE_EXTRACT_AND_RUN=1` selects its extraction fallback. On NixOS,
+`appimage-run ./tool.AppImage` is another supported launch path. `toArx` is
+experimental because simultaneous first executions can race while populating its
+shared `$HOME/.cache/tmpx-<hash>` extraction cache.
+
+`runtimeInputs` contributes each package's `meta.mainProgram` to the host
+dependency list. `hostCommands` names any additional bare commands that the
+script invokes.
 
 ## subcommands (`commands`)
 
@@ -40,8 +96,9 @@ subcommands can nest to any depth.
 - `runtimeInputs` is set once at the top level and applies to all commands.
 - `beforeExit` is a per-command exit hook. Each command on the active path registers its
   hook as it runs, and they fire in reverse (deepest command first, then its ancestors,
-  ending with the top-level `beforeExit`) when the process exits — including on errors and
-  prompt failures. `--help` is a no-op and fires no hooks.
+  ending with the top-level `beforeExit`) when the process exits, including on errors and
+  prompt failures. Signal cleanup preserves status 130 for SIGINT and 143 for SIGTERM.
+  `--help` is a no-op and fires no hooks.
 
 ```nix
 {
@@ -82,6 +139,9 @@ flag =
     , flagPadding ? 20
     }: {}
 ```
+
+The declared `name` is used for the CLI option. Hyphens are replaced by
+underscores only for the generated Bash variable and helper expressions.
 
 ## full spec example
 

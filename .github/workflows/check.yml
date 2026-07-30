@@ -19,3 +19,87 @@ jobs:
       - uses: actions/checkout@v7
       - uses: cachix/install-nix-action@v31
       - run: nix develop -c deadnix -f -_ -l .
+  docs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+      - run: nix develop -c bun install --frozen-lockfile
+      - run: nix develop -c bun run docs:build
+  pog-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+      - name: Evaluate every supported system
+        run: nix flake check --all-systems --no-build
+      - run: nix build .#test
+  portable-bundles:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+      - name: Allow unprivileged user namespaces
+        run: |
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+      - run: nix run .#test-portable-parity
+      - name: Single-file app and wrapped companions
+        run: |
+          printf '{"message":"app companion"}\n' > app-input.json
+          test "$(nix run .#portable-fixture-arx -- app-input.json)" = "app companion"
+          test "$(nix run .#portable-fixture-appimage -- --uppercase app-input.json | tail -n 1)" = "APP COMPANION"
+          test "$(nix run .#portable-fixture-appimage.wrapped -- --uppercase app-input.json | tail -n 1)" = "APP COMPANION"
+      - run: nix build .#portable-fixture-arx --out-link result-arx
+      - run: nix build .#portable-fixture-appimage --out-link result-appimage
+      - name: Artifact measurements
+        run: |
+          stat -Lc '%n: %s bytes' result-arx result-appimage
+          printf '{"message":"measurement"}\n' > measurement.json
+          /usr/bin/time -f 'Arx first run: %e seconds' ./result-arx measurement.json > /dev/null
+          /usr/bin/time -f 'Arx warm run: %e seconds' ./result-arx measurement.json > /dev/null
+          /usr/bin/time -f 'AppImage first run: %e seconds' env APPIMAGE_EXTRACT_AND_RUN=1 ./result-appimage measurement.json > /dev/null
+          /usr/bin/time -f 'AppImage warm run: %e seconds' env APPIMAGE_EXTRACT_AND_RUN=1 ./result-appimage measurement.json > /dev/null
+      - run: |
+          mkdir smoke
+          printf '{"message":"bundle smoke"}\n' > smoke/input.json
+          (
+            cd smoke
+            test "$(../result-arx --uppercase input.json)" = "BUNDLE SMOKE"
+            test "$(APPIMAGE_EXTRACT_AND_RUN=1 ../result-appimage --uppercase input.json)" = "BUNDLE SMOKE"
+          )
+      - name: Prepare portable artifacts
+        run: |
+          mkdir portable-artifacts
+          cp -L result-arx portable-artifacts/pog-portable-fixture-arx
+          cp -L result-appimage portable-artifacts/pog-portable-fixture.AppImage
+      - uses: actions/upload-artifact@v7
+        with:
+          name: portable-bundles-x86_64-linux
+          path: portable-artifacts
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+  portable-bundles-without-nix:
+    needs: portable-bundles
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: portable-bundles-x86_64-linux
+          path: portable-artifacts
+      - name: Allow unprivileged user namespaces
+        run: |
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+      - name: Run portable artifacts without Nix
+        run: |
+          test ! -e /nix
+          chmod 755 \
+            portable-artifacts/pog-portable-fixture-arx \
+            portable-artifacts/pog-portable-fixture.AppImage
+          printf '{"message":"no nix installed"}\n' > input.json
+          test "$(portable-artifacts/pog-portable-fixture-arx --uppercase input.json)" = "NO NIX INSTALLED"
+          test "$(APPIMAGE_EXTRACT_AND_RUN=1 portable-artifacts/pog-portable-fixture.AppImage --uppercase input.json)" = "NO NIX INSTALLED"

@@ -8,6 +8,7 @@ export default defineConfig({
     nav: [
       {text: 'Home', link: '/'},
       {text: 'Getting Started', link: '/getting-started'},
+      {text: 'Portable Outputs', link: '/portable-outputs'},
       {text: 'Examples', link: '/basic-examples'},
     ],
 
@@ -17,6 +18,12 @@ export default defineConfig({
         items: [
           {text: 'Getting Started', link: '/getting-started'},
           {text: 'What is pog?', link: '/what-is-pog'},
+        ],
+      },
+      {
+        text: 'Guides',
+        items: [
+          {text: 'Portable Outputs', link: '/portable-outputs'},
         ],
       },
       {
