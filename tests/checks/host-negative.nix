@@ -13,6 +13,26 @@ let
     in
     builtins.tryEval (builtins.seq result.toHostScript.drvPath true);
 
+  invalidArxCommandName =
+    let
+      result = pog {
+        name = "pog-invalid-arx-host-command";
+        hostCommands = [ "not a command" ];
+        script = ":";
+      };
+    in
+    builtins.tryEval (builtins.seq result.toArx.drvPath true);
+
+  invalidAppImageCommandName =
+    let
+      result = pog {
+        name = "pog-invalid-appimage-host-command";
+        hostCommands = [ "not a command" ];
+        script = ":";
+      };
+    in
+    builtins.tryEval (builtins.seq result.toAppImage.drvPath true);
+
   availablePath = pkgs.lib.makeBinPath [
     pkgs.bash
     pkgs.coreutils
@@ -28,6 +48,8 @@ let
   ];
 in
 assert !invalidCommandName.success;
+assert !invalidArxCommandName.success;
+assert !invalidAppImageCommandName.success;
 pkgs.runCommand "pog-host-negative-check"
 {
   nativeBuildInputs = [ pkgs.gnugrep ];

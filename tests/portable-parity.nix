@@ -18,6 +18,13 @@ pkgs.writeShellApplication {
     mkdir "$work_dir/work"
     printf '{"message":"portable parity"}\n' \
       > "$work_dir/work/input file.json"
+    mkdir "$work_dir/host-bin"
+    # shellcheck disable=SC2016
+    printf '%s\n' \
+      '#!${pkgs.runtimeShell}' \
+      'printf "external=<%s>\n" "$1"' \
+      > "$work_dir/host-bin/pog-external-helper"
+    chmod +x "$work_dir/host-bin/pog-external-helper"
 
     assert_success() {
       local label=$1
@@ -186,6 +193,58 @@ pkgs.writeShellApplication {
       APPIMAGE_EXTRACT_AND_RUN=1 \
       ${fixtures.portable.toAppImage} \
       --help
+
+    printf '%s\n' '  Host PATH dependencies:'
+    assert_success \
+      arx-host-command \
+      'Arx preserves PATH for a declared external command' \
+      'external=<from arx>' \
+      env \
+      PATH="$work_dir/host-bin:$PATH" \
+      ${fixtures.portableHostDependency.toArx} \
+      'from arx'
+    assert_success \
+      appimage-host-command \
+      'AppImage preserves PATH for a declared external command' \
+      'external=<from appimage>' \
+      env \
+      APPIMAGE_EXTRACT_AND_RUN=1 \
+      PATH="$work_dir/host-bin:$PATH" \
+      ${fixtures.portableHostDependency.toAppImage} \
+      'from appimage'
+    assert_success \
+      arx-dynamic-host-command \
+      'Arx exposes PATH to a configuration-selected command' \
+      'external=<dynamic arx>' \
+      env \
+      PATH="$work_dir/host-bin:$PATH" \
+      POG_PORTABLE_EXTERNAL_COMMAND=pog-external-helper \
+      ${fixtures.portable.toArx} \
+      'dynamic arx'
+    assert_success \
+      appimage-dynamic-host-command \
+      'AppImage exposes PATH to a configuration-selected command' \
+      'external=<dynamic appimage>' \
+      env \
+      APPIMAGE_EXTRACT_AND_RUN=1 \
+      PATH="$work_dir/host-bin:$PATH" \
+      POG_PORTABLE_EXTERNAL_COMMAND=pog-external-helper \
+      ${fixtures.portable.toAppImage} \
+      'dynamic appimage'
+    assert_failure \
+      arx-missing-host-command \
+      'Arx reports a missing declared external command' \
+      127 \
+      'Missing required host commands: pog-external-helper' \
+      ${fixtures.portableHostDependency.toArx}
+    assert_failure \
+      appimage-missing-host-command \
+      'AppImage reports a missing declared external command' \
+      127 \
+      'Missing required host commands: pog-external-helper' \
+      env \
+      APPIMAGE_EXTRACT_AND_RUN=1 \
+      ${fixtures.portableHostDependency.toAppImage}
 
     printf '%s\n' 'portable parity passed'
   '';

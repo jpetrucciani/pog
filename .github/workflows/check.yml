@@ -103,3 +103,21 @@ jobs:
           printf '{"message":"no nix installed"}\n' > input.json
           test "$(portable-artifacts/pog-portable-fixture-arx --uppercase input.json)" = "NO NIX INSTALLED"
           test "$(APPIMAGE_EXTRACT_AND_RUN=1 portable-artifacts/pog-portable-fixture.AppImage --uppercase input.json)" = "NO NIX INSTALLED"
+          mkdir host-bin
+          # shellcheck disable=SC2016
+          printf '#!/bin/sh\nprintf "external=<%%s>\\n" "$1"\n' \
+            > host-bin/pog-external-helper
+          chmod 755 host-bin/pog-external-helper
+          test "$(
+            PATH="$PWD/host-bin:$PATH" \
+              POG_PORTABLE_EXTERNAL_COMMAND=pog-external-helper \
+              portable-artifacts/pog-portable-fixture-arx \
+              'no-Nix arx'
+          )" = 'external=<no-Nix arx>'
+          test "$(
+            PATH="$PWD/host-bin:$PATH" \
+              POG_PORTABLE_EXTERNAL_COMMAND=pog-external-helper \
+              APPIMAGE_EXTRACT_AND_RUN=1 \
+              portable-artifacts/pog-portable-fixture.AppImage \
+              'no-Nix appimage'
+          )" = 'external=<no-Nix appimage>'

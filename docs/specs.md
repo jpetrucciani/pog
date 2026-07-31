@@ -75,9 +75,16 @@ Normal AppImage mounting additionally requires FUSE and `fusermount3`;
 experimental because simultaneous first executions can race while populating its
 shared `$HOME/.cache/tmpx-<hash>` extraction cache.
 
-`runtimeInputs` contributes each package's `meta.mainProgram` to the host
-dependency list. `hostCommands` names any additional bare commands that the
-script invokes.
+`runtimeInputs` is added before the caller's `PATH` and is included in the Arx
+and AppImage closure. It also contributes each package's `meta.mainProgram` to
+the host-script dependency list. `hostCommands` names bare commands supplied by
+the destination host. Host scripts and closure bundles check those declarations
+before running.
+
+Arx and AppImage preserve normal host paths and the caller's `PATH`, but mount
+their embedded store at `/nix`. A host command backed by the host's
+`/nix/store` is therefore not reachable and must be included in
+`runtimeInputs`.
 
 ## subcommands (`commands`)
 

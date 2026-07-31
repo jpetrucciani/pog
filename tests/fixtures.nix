@@ -192,6 +192,11 @@ rec {
     ];
     arguments = [ "json_file" ];
     script = helpers: ''
+      if [[ -n ''${POG_PORTABLE_EXTERNAL_COMMAND-} ]]; then
+        "$POG_PORTABLE_EXTERNAL_COMMAND" "$1"
+        exit
+      fi
+
       if [[ $# -ne 1 ]]; then
         die "expected one JSON file" 4
       fi
@@ -214,6 +219,14 @@ rec {
       "git"
     ];
     script = ''printf '%s\n' 'host dependencies available' '';
+  };
+
+  portableHostDependency = pog {
+    name = "pog-portable-host-dependency-fixture";
+    description = "exercise host PATH access from closure bundles";
+    hostCommands = [ "pog-external-helper" ];
+    arguments = [ "value" ];
+    script = ''pog-external-helper "$1" '';
   };
 
   invalidHostStoreReference = pog {

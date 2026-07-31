@@ -28,6 +28,15 @@ let
   hostCommandsFor = drv:
     drv.passthru.pog.hostCommands or [ ];
 
+  validHostCommandsFor = outputName: drv:
+    let
+      commands = hostCommandsFor drv;
+    in
+    assert lib.assertMsg
+      (lib.all (command: builtins.match "[A-Za-z0-9._+-]+" command != null) commands)
+      "pog.${outputName}: host command names may only contain letters, numbers, '.', '_', '+', and '-'";
+    commands;
+
   runtimeCommandFor = input:
     input.meta.mainProgram or (lib.getName input);
 
@@ -74,16 +83,52 @@ let
     mkappimage-runtime = appImageRuntime;
     mkappimage-apprun = appImageAppRun;
   };
+
+  portableProgramFor = outputName: drv:
+    let
+      name = programName drv;
+      hostCommands = validHostCommandsFor outputName drv;
+    in
+    if hostCommands == [ ]
+    then drv
+    else
+      pkgs.writeShellApplication {
+        name = "${name}-portable-entrypoint";
+        runtimeInputs = runtimeInputsFor drv;
+        text = ''
+          _pog_required_host_commands=(
+            ${concatMapStringsSep "\n" (command: "  ${escapeShellArg command}") hostCommands}
+          )
+          _pog_missing_host_commands=()
+          for _pog_command in "''${_pog_required_host_commands[@]}"; do
+            command -v "$_pog_command" >/dev/null 2>&1 ||
+              _pog_missing_host_commands+=("$_pog_command")
+          done
+
+          if (( ''${#_pog_missing_host_commands[@]} > 0 )); then
+            printf 'Missing required host commands:' >&2
+            printf ' %s' "''${_pog_missing_host_commands[@]}" >&2
+            printf '\n' >&2
+            printf '%s\n' \
+              'Install them on the host PATH outside /nix/store,' \
+              'or add their Nix packages to runtimeInputs.' >&2
+            exit 127
+          fi
+
+          unset _pog_command _pog_missing_host_commands _pog_required_host_commands
+          exec ${lib.getExe drv} "$@"
+        '';
+      };
 in
 {
   toArx = drv:
     requireLinux "toArx"
       (
         let
-          program = lib.getExe drv;
+          program = lib.getExe (portableProgramFor "toArx" drv);
           startup = pkgs.writeScript "${lib.getName drv}-arx-startup" ''
             #!/bin/sh
-            .${nixUserChroot}/bin/nix-user-chroot -n ./nix -- ${program} "$@"
+            .${nixUserChroot}/bin/nix-user-chroot -n ./nix -p PATH -- ${program} "$@"
           '';
           bundle = nixBundle.makebootstrap {
             drvToBundle = {
@@ -116,8 +161,9 @@ in
     requireLinux "toAppImage"
       (
         let
+          program = lib.getExe (portableProgramFor "toAppImage" drv);
           appImage = mkAppImage {
-            program = lib.getExe drv;
+            inherit program;
             pname = drv.pname or (lib.getName drv);
           };
           appImageRunner = pkgs.writeShellApplication {
@@ -139,7 +185,7 @@ in
     let
       name = programName drv;
       runtimeInputs = runtimeInputsFor drv;
-      declaredHostCommands = hostCommandsFor drv;
+      declaredHostCommands = validHostCommandsFor "toHostScript" drv;
       runtimeCommands = map runtimeCommandFor runtimeInputs;
       runtimeProviders = map runtimeProviderFor runtimeInputs;
       nixRuntimePathLine = ''export PATH="${lib.makeBinPath runtimeInputs}:$PATH"'';
@@ -260,6 +306,6 @@ in
     in
     assert lib.assertMsg
       (lib.all (command: builtins.match "[A-Za-z0-9._+-]+" command != null) initialCommands)
-      "pog.toHostScript: host command names may only contain letters, numbers, '.', '_', '+', and '-'";
+      "pog.toHostScript: generated command names may only contain letters, numbers, '.', '_', '+', and '-'";
     withSingleFileApp { drv = hostScript; };
 }

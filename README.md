@@ -139,8 +139,8 @@ pog {
   flags = [ ];                  # List of flag definitions
   arguments = [ ];              # Positional arguments
   argumentCompletion = "files"; # Completion for positional args
-  runtimeInputs = [ ];          # Runtime dependencies
-  hostCommands = [ ];           # Extra host commands used by toHostScript
+  runtimeInputs = [ ];          # Dependencies shipped in Nix-backed outputs
+  hostCommands = [ ];           # Commands supplied by the destination host
   bashBible = false;            # Include bash-bible helpers
   beforeExit = "";              # Code to run before exit
   strict = false;               # Enable strict bash mode
@@ -195,6 +195,32 @@ namespaces at runtime. Bundling does not change the licenses or redistribution
 terms of anything in that closure; publishers must review every
 `runtimeInputs` dependency, especially unfree or non-redistributable packages.
 
+Both closure bundles put `runtimeInputs` before the caller's existing `PATH`.
+This lets a bundled program invoke another bundled tool while still allowing
+configuration-driven plugins and helpers supplied by the destination. Declare
+those external commands with `hostCommands` to check for them before the
+program starts:
+
+```nix
+runtimeInputs = [ pkgs.kubectl ];
+hostCommands = [ "kubectl-oidc_login" ];
+```
+
+There is one important Nix boundary. The bundle mounts its own store at `/nix`,
+so a host command whose executable or interpreter lives in the host's
+`/nix/store` is not accessible. Add that package to `runtimeInputs` instead:
+
+```nix
+runtimeInputs = [
+  pkgs.kubectl
+  pkgs.kubelogin-oidc
+];
+```
+
+Files under normal host paths, including the working directory and home
+directory, remain visible. Kubeconfig files and similar user configuration do
+not need a separate declaration.
+
 The output filenames are `<pname>-arx`, `<pname>.AppImage`, and
 `<pname>-host-script`. Actual sizes depend on the closure. The x86_64 test
 fixture containing Bash, `jq`, and their runtime libraries is approximately
@@ -224,9 +250,10 @@ a partly portable artifact. The host script requires Bash 4 or newer and
 GNU-compatible `getopt`. It does not include the ordinary package's separately
 installed Bash completion file.
 
-The main program of each `runtimeInputs` package is included in the host
+The main program of each `runtimeInputs` package is included in the host-script
 dependency check. Use `hostCommands` for additional commands invoked by bare
-name:
+name. Closure bundles also check these commands against the destination's
+`PATH`:
 
 ```nix
 hostCommands = [ "git" "ssh" ];

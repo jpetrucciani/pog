@@ -235,6 +235,58 @@ names:
 #   - jq
 ```
 
+## Bundled and host-provided dependencies
+
+Arx and AppImage use two explicit dependency modes:
+
+| Dependency | Declaration | Result |
+| --- | --- | --- |
+| A command that must travel with the artifact | `runtimeInputs = [ pkgs.foo ];` | Its closure is embedded and its `bin` directory is placed before the caller's `PATH`. |
+| A command supplied by the destination | `hostCommands = [ "foo" ];` | The caller's `PATH` is preserved and the artifact reports the command if it is missing. |
+| A host file or configuration directory | No Pog declaration | Normal host paths, the working directory, and the home directory remain visible. Pass the path or its usual environment variable. |
+
+This distinction matters for tools that discover plugins dynamically. Kubernetes
+clients, for example, can execute a credential plugin named by kubeconfig:
+
+```nix
+let
+  k = pog {
+    name = "k";
+    runtimeInputs = [ pkgs.kubectl ];
+    hostCommands = [ "kubectl-oidc_login" ];
+    script = ''kubectl "$@"'';
+  };
+in
+k.toArx
+```
+
+That form intentionally relies on `kubectl-oidc_login` being installed on the
+destination's `PATH`. It works when the command is a native host executable,
+such as one under `/usr/local/bin`.
+
+### The host Nix store is not merged
+
+Both launchers mount the artifact's embedded store at `/nix`. This hides the
+host's own `/nix/store`, so profile links such as
+`$HOME/.nix-profile/bin/kubectl-oidc_login` cannot reach a host Nix package from
+inside the artifact. Preserving `PATH` alone cannot repair that link.
+
+Bundle the plugin when the destination installs it through Nix:
+
+```nix
+runtimeInputs = [
+  pkgs.kubectl
+  pkgs.kubelogin-oidc
+];
+```
+
+This is also the reliable choice when every destination must use the same
+plugin version. Keep `hostCommands` for intentionally host-managed or
+configuration-selected commands. Undeclared commands can still resolve from
+the caller's `PATH`, which supports kubeconfig-selected plugins whose names are
+not known when the artifact is built, but declaring known commands produces a
+clear startup error.
+
 ### Store data is intentionally rejected
 
 Only exact executable references under a dependency's `bin` directory can be
@@ -297,7 +349,9 @@ $HOME/.cache/tmpx-<hash>
 ```
 
 The caller's working directory and normal host paths remain visible to the
-program. The launcher itself still expects these host commands:
+program. Arx preserves the caller's `PATH`; bundled `runtimeInputs` still take
+precedence once the Pog program starts. The launcher itself still expects these
+host commands:
 
 ```text
 sh sed tr date head tar hexdump bzip2
@@ -364,6 +418,13 @@ installed Nix, assert that `/nix` is absent, and repeat the smoke tests there.
 The host script found commands absent from `PATH`. Install every listed command
 or run the ordinary Nix package instead.
 
+### `Missing required host commands`
+
+An Arx or AppImage artifact could not resolve one or more declared
+`hostCommands`. Install native host executables on `PATH`, or add their Nix
+packages to `runtimeInputs`. A command reached through a host Nix profile must
+be bundled because the artifact's `/nix` hides the host store.
+
 ### `unresolved Nix store references remain`
 
 The generated script still references store data or another path that cannot be
@@ -390,7 +451,10 @@ matching Nix system and publish architecture-specific filenames.
 - `toHostScript` requires Bash 4 or newer and GNU-compatible `getopt`.
 - The host script does not include the ordinary package's separate Bash
   completion file.
-- Bare commands must be declared with `hostCommands`.
+- Declare known host-provided bare commands with `hostCommands`; dynamically
+  selected commands may use the caller's `PATH` without a declaration.
+- Host commands backed by the host's `/nix/store` are not accessible from Arx
+  or AppImage and must be bundled through `runtimeInputs`.
 - Arx and AppImage require Linux user namespaces.
 - Normal AppImage mounting requires FUSE; extraction and `appimage-run` are
   alternatives.

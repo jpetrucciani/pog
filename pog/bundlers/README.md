@@ -11,8 +11,9 @@ branches or accepting the sources' own nixpkgs pins.
 - Local policy: import it with the caller's `pkgs`. Its upstream flake lock is
   intentionally not used.
 - Local patch: `nix-user-chroot.patch` maps host root directories and restores
-  the caller's working directory after entering the chroot. Rebase and compile
-  this patch whenever the source pin changes.
+  the caller's working directory after entering the chroot. The adapter passes
+  the caller's `PATH` through the launcher's supported environment option.
+  Rebase and compile this patch whenever the source pin changes.
 
 Upstream describes this project as unstable. Its launcher also requires Linux
 user namespaces. The generated Arx launcher expects host `sh`, `sed`, `tr`,
@@ -38,6 +39,12 @@ Linux user namespaces. Normal AppImage mounting also needs FUSE and
 extracting the image for that execution. On NixOS, `appimage-run` is also a
 working launch path when normal FUSE mounting is unavailable. The generated
 `.app` companion uses `appimage-run` automatically; the raw AppImage does not.
+
+Both adapters wrap programs with declared `hostCommands` in a checked
+entrypoint. Host executables outside `/nix/store` can be resolved through the
+preserved `PATH`. The host's Nix store is intentionally not merged with the
+embedded store; Nix-managed command dependencies must be included in
+`runtimeInputs`.
 
 ## Updating
 
