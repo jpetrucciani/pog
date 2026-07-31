@@ -16,6 +16,16 @@ let
   bashbible = import ./bashbible.nix { inherit pkgs; };
   bundlers = import ./bundlers { inherit pkgs; };
   ignoreUnused = "# shellcheck disable=SC2329";
+  argumentName = argument:
+    if isString argument then
+      argument
+    else if builtins.isAttrs argument
+      && argument ? name
+      && isString argument.name then
+      argument.name
+    else
+      throw "pog: arguments must be strings or sets containing a string `name`";
+  normalizeArguments = map argumentName;
   formatAndCheckBash = path: ''
     shfmt -w -ln bash -i 2 -ci -sr "${path}"
     bash -n "${path}"
@@ -596,6 +606,7 @@ rec {
       shortHelpDoc = if shortDefaultFlags then "-h, " else "";
       shortVerboseDoc = if shortDefaultFlags then "-v, " else "";
       defaultFlagHelp = if showDefaultFlags then "[${shortHelp}--help] [${shortVerbose}--verbose] [--no-color] " else "";
+      argumentNames = normalizeArguments arguments;
 
       # clap-style subcommands: when `commands` is non-empty the binary becomes a
       # recursive dispatcher. each command node is the same shape as a pog call
@@ -611,7 +622,7 @@ rec {
           nodeFlags = spec.parsedFlags or (map flag (spec.flags or [ ]));
           children = spec.commands or [ ];
           isParent = children != [ ];
-          nodeArgs = spec.arguments or [ ];
+          nodeArgs = normalizeArguments (spec.arguments or [ ]);
           nodeDesc = spec.description or "a pog command";
           rawScript = spec.script or "";
           nodeScript = if builtins.isFunction rawScript then rawScript helpers else rawScript;
@@ -903,7 +914,7 @@ rec {
 
         help() {
           ${pkgs.coreutils}/bin/cat <<EOF
-          Usage: ${name} ${defaultFlagHelp}${concatStringsSep " " (map (x: x.ex) parsedFlags)} ${concatStringsSep " " (map toUpper arguments)}
+          Usage: ${name} ${defaultFlagHelp}${concatStringsSep " " (map (x: x.ex) parsedFlags)} ${concatStringsSep " " (map toUpper argumentNames)}
 
           ${description}
 

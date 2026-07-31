@@ -24,6 +24,23 @@ pog =
     }: {}
 ```
 
+`arguments` canonically contains strings:
+
+```nix
+arguments = [ "input" "output" ];
+```
+
+The legacy named-set representation remains accepted for compatibility:
+
+```nix
+arguments = [
+  { name = "input"; }
+];
+```
+
+Both forms are normalized before rendering root or subcommand usage text.
+Other values fail evaluation.
+
 ## portable outputs
 
 See the [portable outputs guide](/portable-outputs) for complete flake examples,

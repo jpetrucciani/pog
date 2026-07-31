@@ -12,6 +12,9 @@ let
   };
 
   focusedChecks = {
+    argument-compatibility = import ./checks/argument-compatibility.nix {
+      inherit pkgs pog;
+    };
     ordinary-flags = import ./checks/ordinary-flags.nix {
       inherit fixtures pkgs;
     };
@@ -39,6 +42,11 @@ let
       (name: path: { inherit name path; })
       individualChecks);
   fastCheckReports = [
+    {
+      name = "argument-compatibility";
+      description = "string and legacy named-set positional argument forms";
+      check = individualChecks.argument-compatibility;
+    }
     {
       name = "ordinary-flags";
       description = "flags, defaults, environment overrides, and required values";

@@ -137,7 +137,7 @@ pog {
   version = "0.0.0";            # Version of your tool
   description = "...";          # Tool description
   flags = [ ];                  # List of flag definitions
-  arguments = [ ];              # Positional arguments
+  arguments = [ ];              # Positional argument names
   argumentCompletion = "files"; # Completion for positional args
   runtimeInputs = [ ];          # Dependencies shipped in Nix-backed outputs
   hostCommands = [ ];           # Commands supplied by the destination host
@@ -149,6 +149,24 @@ pog {
   shortDefaultFlags = true;     # Enable short versions of default flags
 }
 ```
+
+Positional arguments use strings as their canonical representation:
+
+```nix
+arguments = [ "path" "output" ];
+```
+
+For backward compatibility, Pog also accepts the older named-set form and
+normalizes it to the same name:
+
+```nix
+arguments = [
+  { name = "path"; }
+];
+```
+
+The same forms may be used for nested commands. Any other value fails
+evaluation with a targeted argument-shape error.
 
 ## Portable outputs
 
