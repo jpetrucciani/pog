@@ -1,8 +1,39 @@
-# more examples
+# More examples
 
-For more examples of pog scripts, you can check out [this directory in my main nix repo!](https://github.com/jpetrucciani/nix/tree/main/mods/pog) These will likely eventually end up inside this repo as well.
+The repository includes three deterministic, runnable tools adapted from the
+larger collection in
+[`jpetrucciani/nix`](https://github.com/jpetrucciani/nix/tree/main/mods/pog):
 
-## subcommands
+- `batwhich`, executable completion, runtime inputs, and normal error handling.
+- `jwt-decode`, a boolean flag, completion message, and JSON transformation.
+- `nix-summary`, repeatable flags, rich static values, directory completion,
+  and filenames containing spaces.
+
+Build or run them from a Pog checkout:
+
+```console
+nix build .#example-batwhich
+nix run .#example-jwt-decode -- --help
+nix run .#example-nix-summary -- \
+  --directory examples \
+  --extension nix \
+  --extension md
+```
+
+Inspect the generated completion interface:
+
+```console
+nix build .#example-nix-summary
+result/bin/_nix-summary_complete export nix-summary --extension n
+find -L result/share/pog/completions -type f -print | sort
+```
+
+The source definitions live in the repository's `examples` directory and run
+as regression fixtures through `nix build .#ordinary-examples`. The external
+collection remains useful for larger wrappers involving cloud APIs, media
+tools, containers, databases, and local services.
+
+## Subcommands
 
 Pass a `commands` list to build a clap-style tool that dispatches to nested subcommands.
 Each command can have its own flags, arguments, help, and script, and can nest further
@@ -74,6 +105,9 @@ tool status --short
 Tab completion works recursively: completing after `tool` offers the subcommand names,
 after `tool remote` offers `add remove list-all`, and after a leaf command offers that
 command's flags and argument completions.
+
+See [Commands and parsing](/command-line) for aliases, command groups,
+persistent flags, exclusive flags, and pass-through wrappers.
 
 Each command can also define a `beforeExit` hook. Every command on the active path runs
 its hook as the process exits, deepest command first. So `tool remote add --url x foo`

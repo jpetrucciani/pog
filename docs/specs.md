@@ -10,9 +10,16 @@ pog =
     , description ? "a helpful bash script with flags, created through nix + pog!"
     , flags ? [ ]
     , parsedFlags ? map flag flags
+    , persistentFlags ? [ ]
+    , parsedPersistentFlags ? map (definition: flag (definition // { persistent = true; })) persistentFlags
+    , exclusiveFlags ? [ ]
     , arguments ? [ ]
     , argumentCompletion ? "files"
     , commands ? [ ]
+    , aliases ? [ ]
+    , group ? ""
+    , hidden ? false
+    , parsing ? null
     , runtimeInputs ? [ ]
     , hostCommands ? [ ]
     , bashBible ? false
@@ -24,22 +31,126 @@ pog =
     }: {}
 ```
 
-`arguments` canonically contains strings:
+`arguments` may contain strings:
 
 ```nix
 arguments = [ "input" "output" ];
 ```
 
-The legacy named-set representation remains accepted for compatibility:
+The named-set representation adds local completion metadata. `variadic` is
+allowed only once and only on the final argument:
 
 ```nix
 arguments = [
-  { name = "input"; }
+  {
+    name = "input";
+    description = "input document";
+    completion = [ "stdin" "example.json" ];
+  }
+  {
+    name = "labels";
+    description = "labels to apply";
+    variadic = true;
+    completion = pog.completions.uniqueList {
+      separator = ",";
+      completion = [ "blue" "green" "red" ];
+    };
+  }
 ];
 ```
 
-Both forms are normalized before rendering root or subcommand usage text.
-Other values fail evaluation.
+Legacy argument sets containing only `name` remain accepted. A command-level
+`argumentCompletion` remains the fallback for arguments without their own
+`completion`, and legacy Bash completion strings keep their existing calling
+convention.
+
+## completions (`pog.completions`)
+
+Pog compiles a shell-neutral completion definition to a Carapace spec, then
+generates Bash, Bash/ble.sh, Clink, Elvish, Fish, Nushell, Oil, PowerShell,
+tcsh, Xonsh, and Zsh adapters from that single spec. The spec and every adapter
+are included in the normal derivation output.
+
+The ordinary package also installs `bin/_<name>_complete`. Every generated
+adapter calls this entrypoint, and callers can request Carapace's structured
+JSON export directly:
+
+```console
+_deploy_complete export deploy --environment d
+```
+
+The derivation exposes the paths as `package.pog.completionCommand` and
+`package.pog.completionSpec`.
+
+A bare list is shorthand for `values`, so existing definitions such as
+`completion = [ "dev" "prod" ];` need no constructor. Values may include
+descriptions, styles, and tags:
+
+```nix
+completion = pog.completions.values [
+  {
+    value = "dev";
+    description = "local development";
+    style = "green";
+    tag = "local";
+  }
+  "production"
+];
+```
+
+The available constructors are:
+
+```nix
+let c = pog.completions; in rec {
+  static = c.values [ "one" "two" ];
+  files = c.files {
+    extensions = [ ".nix" ".yaml" ];
+    relativeTo = "git-worktree";
+  };
+  directories = c.directories { relativeTo = "user-home"; };
+  executables = c.executables {
+    directories = [ "/opt/tool/bin" ];
+  };
+  generated = c.dynamic {
+    runtimeInputs = [ pkgs.jq ];
+    script = ''printf '%s\n' "$POG_COMPLETION_VALUE"'';
+    cache = {
+      ttlSeconds = 60;
+      by = [ "cwd" { flag = "profile"; } { argument = 0; } ];
+    };
+  };
+  merged = c.merge [ static files ];
+  list = c.list { separator = ","; completion = static; };
+  unique = c.uniqueList { separator = ","; completion = static; };
+  multipart = c.multipart { separators = [ "=" ":" ]; completion = static; };
+  prefixed = c.prefix { prefix = "feature/"; completion = static; };
+  suffixed = c.suffix { suffix = ".json"; completion = static; };
+  noSpace = c.noSpace { characters = [ "/" "=" ]; completion = static; };
+  unused = c.filterUsed static;
+  explained = c.withUsage { usage = "a target"; completion = static; };
+  message = c.message "no candidates are available";
+  delegated = c.delegate ./another-carapace-spec.yaml;
+  raw = c.rawCarapace [ "$directories" ];
+}
+```
+
+`relativeTo` accepts `"cwd"`, `"git-dir"`, `"git-worktree"`,
+`"nix-profile"`, `"temp"`, `"user-cache"`, `"user-config"`,
+`"user-home"`, `"xdg-cache"`, `"xdg-config"`, or `{ path = "..."; }`.
+
+Dynamic providers receive a stable environment:
+
+- `POG_COMPLETION_VALUE`, the fragment currently being completed.
+- `POG_COMPLETION_INDEX`, the zero-based positional index.
+- `POG_COMPLETION_DIR`, the completion working directory.
+- `POG_COMPLETION_ARG_<N>` and `POG_COMPLETION_ARGS_JSON`.
+- `POG_COMPLETION_FLAG_<NAME>` and `POG_COMPLETION_FLAGS_JSON`. Dashes and
+  dots become underscores in the individual environment names.
+
+Cache selectors are `"cwd"`, `"value"`, `{ flag = "name"; }`,
+`{ argument = 0; }`, or `{ env = "VARIABLE"; }`. `ttlSeconds = 0` disables
+caching. Cache misses execute the provider; hits reuse Carapace's on-disk
+action cache.
 
 ## portable outputs
 
@@ -82,7 +193,7 @@ nix run .#pog.foo.toAppImage.wrapped
 dependencies in a generated header, checks for missing commands at startup, and
 rejects any remaining `/nix/store` reference. It requires Bash 4 or newer and
 GNU-compatible `getopt`; the single-file output does not carry the package's
-separate Bash completion file.
+completion command, spec, or shell adapters.
 
 The output filenames are `<pname>-arx`, `<pname>.AppImage`, and
 `<pname>-host-script`. Both closure bundles require Linux user namespaces.
@@ -106,9 +217,9 @@ their embedded store at `/nix`. A host command backed by the host's
 ## subcommands (`commands`)
 
 Pass a list of `commands` to build a clap-style dispatcher (e.g. `tool remote add`).
-Each command has the same shape as a top-level `pog` call — `name`, `description`,
-`flags`, `arguments`, `script` — and may itself contain a nested `commands` list, so
-subcommands can nest to any depth.
+Each command has the same shape as a top-level `pog` call, including flags,
+arguments, completion, aliases, grouping, parsing behavior, and nested
+commands. Subcommands can nest to any depth.
 
 - A command with `commands` (a "parent") dispatches to its subcommands. When no subcommand
   is given, bare invocation runs, in order of precedence: the parent's own `script` (default
@@ -117,6 +228,15 @@ subcommands can nest to any depth.
   `default = true` subcommand on the same parent is an error. The forward chains, so a default
   subcommand that is itself a parent with its own default keeps descending.
 - Every command gets its own `--help`, flags, prompts, and tab completion.
+- `aliases` dispatch to the same command. `group` groups commands in help, and
+  `hidden = true` keeps a command out of parent help while retaining direct
+  invocation.
+- `persistentFlags` are accepted on their declaring command and every
+  descendant, both before and after the subcommand name. Normal `flags` retain
+  the legacy command-local parsing behavior.
+- `parsing` accepts values from `pog.parsing`. Parents default to
+  non-interspersed parsing, leaves default to interspersed parsing, and legacy
+  string values remain accepted.
 - `runtimeInputs` is set once at the top level and applies to all commands.
 - `beforeExit` is a per-command exit hook. Each command on the active path registers its
   hook as it runs, and they fire in reverse (deepest command first, then its ancestors,
@@ -129,14 +249,45 @@ subcommands can nest to any depth.
   name = "name-of-this-command";
   description = "what this command does";  # optional
   flags = [ ];                              # optional, same as the flag spec below
+  persistentFlags = [ ];                    # inherited by descendants
+  exclusiveFlags = [ [ "json" "yaml" ] ]; # long names, at most one may occur
   arguments = [ ];                          # optional, for leaf commands
   argumentCompletion = "files";             # optional
   script = "";                              # leaf action, or default action for a parent
   default = false;                          # optional, mark as the parent's default subcommand
+  aliases = [ "alias" ];                   # optional alternate names
+  group = "operations";                    # optional help/completion group
+  hidden = false;                           # optional, hide from parent help
+  parsing = pog.parsing.nonInterspersed;    # optional parser override
   beforeExit = "";                          # optional, this command's exit hook
   commands = [ ];                           # optional, nest subcommands here
 }
 ```
+
+## parsing (`pog.parsing`)
+
+Pog exposes four enum-style parsing values:
+
+| Value | Recognized flags | Unknown flags | Positional behavior |
+| --- | --- | --- | --- |
+| `pog.parsing.interspersed` | Consumed anywhere before `--` | Error | Parsing continues after positionals |
+| `pog.parsing.nonInterspersed` | Consumed before the first positional | Error before the first positional | The first positional ends parsing |
+| `pog.parsing.passthrough` | Consumed anywhere before `--` | Preserved in `$@` | Positionals and unknown options retain their order |
+| `pog.parsing.disabled` | Never consumed | Preserved in `$@` | The complete argv is retained |
+
+When `parsing` is omitted, parents select `nonInterspersed` and leaves select
+`interspersed`. The strings `"interspersed"`, `"non-interspersed"`,
+`"passthrough"`, and `"disabled"` remain accepted for compatibility.
+
+`passthrough` is restricted to leaf commands. Known Pog flags and their values
+are removed from `$@`; all other tokens are retained exactly. `--` forces the
+remaining tokens through even when their names match Pog flags. Completion for
+this mode is lenient toward unknown flags so wrapper-owned completion can still
+operate beside options belonging to the underlying command.
+
+`disabled` skips CLI parsing entirely, including built-in help, verbose, and
+color flags. Declared variables can still receive defaults and environment
+values.
 
 ## flag spec
 
@@ -149,7 +300,10 @@ flag =
     , default ? ""
     , hasDefault ? (stringLength default) > 0
     , bool ? false
-    , marker ? if bool then "" else ":"
+    , optionalValue ? false
+    , repeatable ? false
+    , hidden ? false
+    , marker ? if bool then "" else if optionalValue then "::" else ":"
     , description ? "a flag"
     , argument ? "VAR"
     , envVar ? "POG_" + (replaceStrings [ "-" ] [ "_" ] (toUpper name))
@@ -159,13 +313,18 @@ flag =
     , promptErrorExitCode ? 3
     , hasPrompt ? (stringLength prompt) > 0
     , completion ? ""
-    , hasCompletion ? (stringLength completion) > 0
+    , hasCompletion ? !(isString completion && completion == "")
     , flagPadding ? 20
     }: {}
 ```
 
 The declared `name` is used for the CLI option. Hyphens are replaced by
 underscores only for the generated Bash variable and helper expressions.
+`optionalValue` accepts `--flag` and `--flag=value`. `repeatable` collects a
+value flag into a Bash array and turns a repeated boolean into a count. Hidden
+flags remain accepted but are omitted from help and ordinary completion.
+`exclusiveFlags` is declared on the containing command as groups of long flag
+names; using more than one member exits with status 2.
 
 ## full spec example
 

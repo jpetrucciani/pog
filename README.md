@@ -8,7 +8,7 @@
 
 - 🚀 Create full-featured CLI tools in pure Nix (and bash)
 - 📖 Automatic help text generation and documentation
-- 🔄 Tab completion out of the box
+- 🔄 Native completion for Bash, Fish, Zsh, Nushell, PowerShell, and more
 - 🎯 Interactive prompting capabilities
 - 🎨 Rich terminal colors and styling
 - 🛠 Comprehensive flag system with:
@@ -17,8 +17,13 @@
   - Default values
   - Required flags with prompts
   - Boolean flags
+  - Optional and repeatable values
+  - Persistent and mutually exclusive flags
   - Custom completion functions
+- 🌲 Recursive subcommands with aliases, groups, defaults, and parsing modes
+- ↪️ Opt-in pass-through parsing for wrappers around another CLI
 - ⚡ Runtime input management
+- 📦 Host-script, Arx, and AppImage output formats
 - 🔍 Verbose mode support
 - 🎭 Color toggle support
 - 🧰 Helper functions for common operations
@@ -103,10 +108,135 @@ Each focused check is also independently addressable, for example:
 ```console
 nix build .#ordinary-flags
 nix build .#ordinary-commands
+nix build .#ordinary-advanced-commands
+nix build .#ordinary-passthrough
 nix build .#ordinary-completion
+nix build .#ordinary-completion-fish
+nix build .#ordinary-completion-readline
+nix build .#ordinary-completion-zsh
+nix build .#ordinary-structured-completion
 nix build .#ordinary-bash-bible
 nix build .#host-negative
 ```
+
+The completion check imports one backend-neutral case table from
+`tests/completion-contract.nix`. The Bash and Fish runners exercise the same 66
+cases across strict, recursive, structured, and pass-through Pog commands.
+
+The `ordinary-completion-readline` check drives an interactive Bash through a
+pseudo-terminal. It sends real tab presses and verifies file fallback, filename
+quoting, directory suffixes, and completion at a non-terminal cursor position.
+The Zsh check does the same through a real ZLE session.
+
+## Examples
+
+The [`examples`](./examples) directory contains small, runnable tools adapted
+from the Pog wrappers used in
+[`jpetrucciani/nix`](https://github.com/jpetrucciani/nix/tree/main/mods/pog):
+
+- `batwhich`, executable completion and runtime dependencies.
+- `jwt-decode`, boolean flags, completion messages, and JSON processing.
+- `nix-summary`, repeatable flags, rich values, and directory completion.
+
+They are also regression fixtures. `nix build .#ordinary-examples` executes
+their real behavior and completion specs without network access or credentials.
+
+## Shell completions
+
+Every Pog package contains a [Carapace](https://carapace.sh/) YAML spec under
+`$out/share/carapace/specs` and generated adapters for Bash, Bash with ble.sh,
+Clink, Elvish, Fish, Nushell, Oil, PowerShell, tcsh, Xonsh, and Zsh under
+`$out/share/pog/completions`.
+
+It also contains `$out/bin/_<name>_complete`, the single installed completion
+entrypoint used by every adapter. Its `export` protocol is handy for tests,
+editor integrations, and debugging without an interactive shell:
+
+```console
+result/bin/_deploy_complete export deploy --environment d
+```
+
+The command path and YAML path are exposed as `package.pog.completionCommand`
+and `package.pog.completionSpec`.
+
+Bash, Fish, Zsh, and Nushell adapters are also copied to their conventional
+package locations:
+
+```text
+$out/share/bash-completion/completions/<name>
+$out/share/fish/vendor_completions.d/<name>.fish
+$out/share/zsh/site-functions/_<name>
+$out/share/nushell/vendor/autoload/<name>.nu
+```
+
+Existing `completion` and `argumentCompletion` snippets remain Bash commands.
+Carapace executes those providers on demand and translates their candidates for
+the active shell. Flag providers retain the `$current` variable, and positional
+providers continue to receive the current prefix as `$1`.
+
+New definitions can use the shell-neutral constructors under
+`pog.completions`. A candidate may be a string or carry display metadata:
+
+```nix
+let
+  completion = pog.completions;
+in
+pog {
+  name = "deploy";
+  flags = [
+    {
+      name = "environment";
+      completion = completion.values [
+        {
+          value = "dev";
+          description = "local development";
+          style = "green";
+          tag = "local";
+        }
+        "production"
+      ];
+    }
+    {
+      name = "region";
+      completion = completion.dynamic {
+        runtimeInputs = [ pkgs.awscli2 pkgs.coreutils ];
+        script = ''
+          aws ec2 describe-regions \
+            --query 'Regions[].RegionName' \
+            --output text | tr '\t' '\n'
+        '';
+        cache = {
+          ttlSeconds = 300;
+          by = [ { flag = "environment"; } ];
+        };
+      };
+    }
+    {
+      name = "config";
+      completion = completion.files {
+        extensions = [ ".nix" ".yaml" ];
+      };
+    }
+  ];
+  arguments = [
+    {
+      name = "target";
+      description = "deployment target";
+      completion = [ "api" "worker" ];
+    }
+  ];
+  script = ''printf '%s\n' "$1"'';
+}
+```
+
+Dynamic providers receive `POG_COMPLETION_VALUE`, `POG_COMPLETION_INDEX`,
+`POG_COMPLETION_DIR`, `POG_COMPLETION_ARG_<N>`,
+`POG_COMPLETION_ARGS_JSON`, `POG_COMPLETION_FLAG_<NAME>`, and
+`POG_COMPLETION_FLAGS_JSON`. Cache keys may select `"cwd"`, `"value"`, a
+flag, an argument index, or an environment variable. Other constructors cover
+directories, executables, merged sources, list and multipart values,
+prefix/suffix/no-space modifiers, filtering already-used arguments, usage
+messages, delegated specs, and explicit raw Carapace actions.
 
 The closure bundles require a runtime smoke test outside the Nix build sandbox.
 To run only that suite, build all four formats and exercise the same behavior
@@ -137,8 +267,15 @@ pog {
   version = "0.0.0";            # Version of your tool
   description = "...";          # Tool description
   flags = [ ];                  # List of flag definitions
+  persistentFlags = [ ];        # Flags accepted by this command and descendants
+  exclusiveFlags = [ ];         # Groups of mutually exclusive long flag names
   arguments = [ ];              # Positional argument names
   argumentCompletion = "files"; # Completion for positional args
+  commands = [ ];               # Recursive subcommands
+  aliases = [ ];                # Alternate command names
+  group = "";                   # Command help/completion group
+  hidden = false;               # Hide from parent help
+  parsing = null;                # automatic; override with pog.parsing.<mode>
   runtimeInputs = [ ];          # Dependencies shipped in Nix-backed outputs
   hostCommands = [ ];           # Commands supplied by the destination host
   bashBible = false;            # Include bash-bible helpers
@@ -167,6 +304,27 @@ arguments = [
 
 The same forms may be used for nested commands. Any other value fails
 evaluation with a targeted argument-shape error.
+
+### Parsing modes
+
+Omitting `parsing` preserves Pog's existing defaults: parent commands stop
+parsing at their subcommand, while leaf commands strictly parse flags anywhere
+before `--`. New definitions can select one of four enum-style values:
+
+```nix
+parsing = pog.parsing.interspersed;      # strict, flags may follow arguments
+parsing = pog.parsing.nonInterspersed;   # strict, stop at the first argument
+parsing = pog.parsing.passthrough;       # consume known flags, forward unknowns
+parsing = pog.parsing.disabled;          # forward the complete argv unchanged
+```
+
+Legacy strings remain accepted. `passthrough` is leaf-only and preserves
+unknown options and positional arguments in `$@`, in their original order.
+Recognized Pog flags are consumed wherever they occur. `--` still forces all
+remaining values through, including names that collide with Pog flags.
+
+See the [commands and parsing guide](https://pog.gemologic.dev/command-line)
+for examples and exact mode semantics.
 
 ## Portable outputs
 
@@ -265,8 +423,8 @@ missing commands before running. Exact executable references such as
 `${pkgs.jq}/bin/jq` are converted to `jq`. Other store references, such as data
 files under `${pkgs.foo}/share`, fail the host-script build rather than producing
 a partly portable artifact. The host script requires Bash 4 or newer and
-GNU-compatible `getopt`. It does not include the ordinary package's separately
-installed Bash completion file.
+GNU-compatible `getopt`. It does not include the ordinary package's completion
+command, spec, or shell adapters.
 
 The main program of each `runtimeInputs` package is included in the host-script
 dependency check. Use `hostCommands` for additional commands invoked by bare
@@ -281,9 +439,9 @@ Command-name conversion does not change command semantics. Scripts using
 Nix-provided GNU tools such as `find` or `xargs` still require compatible GNU
 implementations on the host.
 
-Generated scripts and completions are formatted with
-`shfmt -ln bash -i 2 -ci -sr`, checked with `bash -n`, and linted with
-ShellCheck.
+Generated Bash programs are formatted with `shfmt -ln bash -i 2 -ci -sr`,
+checked with `bash -n`, and linted with ShellCheck. The generated Bash
+completion adapter is also checked with `bash -n`.
 
 ### Flag Definition
 
@@ -299,12 +457,15 @@ Flags are defined using the following schema:
   description = "...";        # Flag description
   default = "";               # Default value
   bool = false;               # Is this a boolean flag?
+  optionalValue = false;      # Accept --flag or --flag=value
+  repeatable = false;         # Collect values, or count boolean occurrences
+  hidden = false;             # Hide from generated help/completion
   argument = "VAR";           # Argument name in help text
   envVar = "POG_FLAG_NAME";   # Override env variable
   required = false;           # Is this flag required?
   prompt = "";                # Interactive prompt command
   promptError = "...";        # Error message for failed prompt
-  completion = "";            # Tab completion command
+  completion = "";            # Legacy Bash snippet, list, or pog.completions value
   flagPadding = 20;           # Help text padding
 }
 ```
@@ -398,9 +559,11 @@ pog {
 }
 ```
 
-## More (useful) examples
+## More useful examples
 
-for more comprehensive examples, check out [this directory in my main nix repo!](https://github.com/jpetrucciani/nix/tree/main/mods/pog)
+The repository's [`examples`](./examples) directory contains runnable,
+regression-tested programs. A larger set of real-world wrappers remains in
+[`jpetrucciani/nix`](https://github.com/jpetrucciani/nix/tree/main/mods/pog).
 
 ## Terminal Colors and Styling
 
