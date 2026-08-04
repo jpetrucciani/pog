@@ -17,7 +17,7 @@ buildGoModule rec {
 
   patches = [ ./carapace-spec-pog.patch ];
 
-  vendorHash = "sha256-Ms66TXuXS/smbs4um0xLHdjME768Uznds/qPVxqJBFA=";
+  vendorHash = "sha256-kHCppNzUL6uO9RNzh1XjLLvWPP4SKGs+2rn+0sdVxmk=";
   modRoot = "cmd";
   subPackages = [ "carapace-spec" ];
 
