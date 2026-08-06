@@ -145,6 +145,10 @@ Providers receive:
 Cache keys can select the working directory, current value, a flag, an
 argument, or an environment variable. A zero-second TTL disables caching.
 
+The [programmable completion providers guide](/completion-providers) covers
+API-backed completion, exact cache-key behavior, provider context, composition,
+credential handling, latency, and direct testing.
+
 ## Composition
 
 The remaining constructors compose completion sources without shell code:

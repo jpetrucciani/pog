@@ -26,6 +26,7 @@ export default defineConfig({
         items: [
           {text: 'Commands and Parsing', link: '/command-line'},
           {text: 'Shell Completions', link: '/completions'},
+          {text: 'Completion Providers', link: '/completion-providers'},
           {text: 'Portable Outputs', link: '/portable-outputs'},
         ],
       },

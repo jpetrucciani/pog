@@ -152,6 +152,9 @@ Cache selectors are `"cwd"`, `"value"`, `{ flag = "name"; }`,
 caching. Cache misses execute the provider; hits reuse Carapace's on-disk
 action cache.
 
+See [Programmable completion providers](/completion-providers) for API-backed
+examples, cache partitioning guidance, security considerations, and testing.
+
 ## portable outputs
 
 See the [portable outputs guide](/portable-outputs) for complete flake examples,

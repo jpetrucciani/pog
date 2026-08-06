@@ -32,6 +32,8 @@ features:
   - icon: 🔄
     title: Native Shell Completion
     details: One Carapace spec generates Bash, Fish, Zsh, Nushell, PowerShell, and six other adapters
+    link: /completion-providers
+    linkText: Build programmable providers
   - icon: 🎨
     title: Terminal Enhancement
     details: Rich terminal colors, styling, and interactive features like spinners and prompts

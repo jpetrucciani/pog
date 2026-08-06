@@ -238,6 +238,11 @@ directories, executables, merged sources, list and multipart values,
 prefix/suffix/no-space modifiers, filtering already-used arguments, usage
 messages, delegated specs, and explicit raw Carapace actions.
 
+The [programmable completion providers
+guide](https://pog.gemologic.dev/completion-providers) explains API-backed
+providers, cache partitioning, context variables, credential safety,
+composition, latency, and direct testing.
+
 The closure bundles require a runtime smoke test outside the Nix build sandbox.
 To run only that suite, build all four formats and exercise the same behavior
 contract against the ordinary package, host script, Arx bundle, and AppImage:
