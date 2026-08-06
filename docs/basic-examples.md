@@ -27,6 +27,11 @@ github_tags = pog.pog {
 };
 ```
 
+Pog builds the executable, generated help, a Carapace specification, an
+installed `_github_tags_complete` query command, and adapters for every
+supported shell. See [Shell completions](/completions) for the artifact paths
+and structured completion forms.
+
 ### generated docs
 
 ```bash

@@ -8,6 +8,7 @@ export default defineConfig({
     nav: [
       {text: 'Home', link: '/'},
       {text: 'Getting Started', link: '/getting-started'},
+      {text: 'Completions', link: '/completions'},
       {text: 'Portable Outputs', link: '/portable-outputs'},
       {text: 'Examples', link: '/basic-examples'},
     ],
@@ -23,6 +24,9 @@ export default defineConfig({
       {
         text: 'Guides',
         items: [
+          {text: 'Commands and Parsing', link: '/command-line'},
+          {text: 'Shell Completions', link: '/completions'},
+          {text: 'Completion Providers', link: '/completion-providers'},
           {text: 'Portable Outputs', link: '/portable-outputs'},
         ],
       },

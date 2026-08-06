@@ -65,3 +65,24 @@ Or add `pog.overlays.default` to your nixpkgs overlays.
 
 Once the ordinary package works, you can also export it as a host script, Arx
 bundle, or AppImage. See the [portable outputs guide](/portable-outputs).
+
+## Inspecting a built tool
+
+An ordinary build contains the command, its machine-readable completion
+entrypoint, the Carapace specification, and generated shell adapters:
+
+```console
+nix build .#meme
+find -L result/bin result/share -maxdepth 5 -type f -print
+```
+
+For a command named `meme`, query completion without starting an interactive
+shell:
+
+```console
+result/bin/_meme_complete export meme ""
+```
+
+See [Commands and parsing](/command-line) for wrappers, subcommands, and
+advanced flags, or [Shell completions](/completions) for structured providers
+and shell setup.

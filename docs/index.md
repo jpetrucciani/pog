@@ -4,11 +4,14 @@ layout: home
 hero:
   name: 'pog 🤯'
   text: 'Nix-Powered CLI tools'
-  tagline: Create feature-rich CLI tools with Nix and bash - complete with flags, documentation, and more
+  tagline: Declare complete Bash CLIs in Nix, with rich parsing, portable outputs, and native completion across shells
   actions:
     - theme: brand
       text: Get Started
       link: /getting-started
+    - theme: alt
+      text: Shell Completions
+      link: /completions
     - theme: alt
       text: Portable Outputs
       link: /portable-outputs
@@ -22,10 +25,15 @@ features:
     details: Create comprehensive CLI tools using pure Nix, leveraging the vast nixpkgs ecosystem
   - icon: 📖
     title: Automatic Documentation
-    details: Automatic help text generation, documentation, and tab completion out of the box
+    details: Generated help, positional documentation, recursive command groups, aliases, and usage text
   - icon: 🎯
     title: Rich Flag System
-    details: Comprehensive flag system with short/long options, env vars, defaults, and interactive prompts
+    details: Strict or pass-through parsing with defaults, prompts, repeatable values, and persistent or exclusive flags
+  - icon: 🔄
+    title: Native Shell Completion
+    details: One Carapace spec generates Bash, Fish, Zsh, Nushell, PowerShell, and six other adapters
+    link: /completion-providers
+    linkText: Build programmable providers
   - icon: 🎨
     title: Terminal Enhancement
     details: Rich terminal colors, styling, and interactive features like spinners and prompts
@@ -65,13 +73,13 @@ pog {
   name = "deploy";                                     # derivation/script name
   description = "Deploy application to cloud";         # used in the help doc
   flags = [
-    pog._.flags.aws.region                             # a flag with bash completion, included in pog
+    pog._.flags.aws.region                             # a flag with shell completion, included in pog
     {
       name = "environment";
       short = "e";                                     # defaults to the first character of the name
       description = "deployment environment";          # used in the help doc
       required = true;                                 # forces the user to specify, or prompts for it
-      completion = ''echo "dev staging prod"'';        # used for tab completion
+      completion = [ "dev" "staging" "prod" ];       # shell-neutral tab completion
     }
   ];
   script = helpers: ''

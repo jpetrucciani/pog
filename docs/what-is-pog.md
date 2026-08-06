@@ -1,21 +1,30 @@
 # What is pog?
 
-Pog is a powerful [Nix](https://nixos.org/) library that transforms the way developers create [command-line interfaces (CLIs)](https://en.wikipedia.org/wiki/Command-line_interface). At its core, pog is a sophisticated tool that leverages the declarative nature of Nix to generate feature-rich bash scripts with comprehensive CLI capabilities. It serves as a bridge between Nix's powerful package management and the practical needs of command-line tool development.
+Pog is a [Nix](https://nixos.org/) library for declaring complete command-line
+tools around readable Bash. A definition describes flags, positional arguments,
+commands, dependencies, completion, and runtime behavior. Pog renders and
+checks the program, generates its help, and packages its completion artifacts.
 
 ## What does it enable?
 
-Pog enables developers to create professional-grade CLI tools without the traditional overhead of building command-line applications from scratch. It provides a declarative approach to defining CLI tools, where developers can specify flags, documentation, completion behavior, and runtime dependencies all within a single Nix expression. The library handles the complex underlying mechanics of bash script generation, including argument parsing, help text generation, and terminal interaction features.
+Pog is aimed at tools where Bash remains the clearest implementation language
+but hand-written parser, help, dependency, and completion boilerplate would not.
+The generated program still looks and behaves like a normal CLI.
 
 Some key capabilities that pog enables include:
 
-- Creation of self-documenting CLI tools with automatic help text generation
-- Implementation of rich flag systems with short and long options
+- Self-documenting tools with generated usage, argument, flag, and command help
+- Recursive commands with aliases, groups, defaults, and cleanup hooks
+- Strict, non-interspersed, pass-through, or disabled argument parsing
+- Short, long, optional, repeatable, persistent, hidden, and exclusive flags
 - Integration of interactive prompts and color-coded output
-- Tab completion functionality out of the box
+- One shell-neutral completion definition for Bash, Fish, Zsh, Nushell,
+  PowerShell, and other generated adapters
 - Required flags, and the option to provide interactive prompts for them
 - Environment variable override support
 - Strict mode operation for enhanced reliability
-- Integration with the broader Nix ecosystem
+- Runtime dependencies from Nixpkgs and optional host-provided commands
+- Ordinary Nix packages plus host-script, Arx, and AppImage outputs
 
 ## Why use pog?
 
@@ -27,10 +36,10 @@ The primary benefit of using pog lies in its ability to combine the reproducibil
 
 3. **Rich Feature Set**: Pog provides a comprehensive set of features that would typically require multiple libraries or significant development time to implement, including:
 
-   - Advanced flag parsing with type checking
+   - Advanced flag parsing and pass-through wrappers
    - Interactive prompts and spinners
    - Color-coded output and styling
-   - Tab completion
+   - Structured and dynamic multi-shell completion
    - Verbose mode and debugging support
 
 4. **Integration with [Nixpkgs](https://github.com/NixOS/nixpkgs)**: Pog seamlessly integrates with the vast ecosystem of [Nixpkgs](https://github.com/NixOS/nixpkgs), making it easy to include runtime dependencies and leverage existing tools in your CLI applications.

@@ -449,8 +449,8 @@ matching Nix system and publish architecture-specific filenames.
 ## Current boundaries
 
 - `toHostScript` requires Bash 4 or newer and GNU-compatible `getopt`.
-- The host script does not include the ordinary package's separate Bash
-  completion file.
+- The host script does not include the ordinary package's completion command,
+  spec, or shell adapters.
 - Declare known host-provided bare commands with `hostCommands`; dynamically
   selected commands may use the caller's `PATH` without a declaration.
 - Host commands backed by the host's `/nix/store` are not accessible from Arx

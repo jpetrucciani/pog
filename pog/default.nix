@@ -1,7 +1,7 @@
 { pkgs, ... }:
 let
-  inherit (builtins) filter genList isString replaceStrings stringLength substring;
-  inherit (pkgs.lib) stringToCharacters splitString;
+  inherit (builtins) filter genList isString listToAttrs replaceStrings stringLength substring;
+  inherit (pkgs.lib) nameValuePair optionalAttrs stringToCharacters splitString;
   inherit (pkgs.lib.lists) concatLists reverseList;
   inherit (pkgs.lib.strings) concatStrings concatStringsSep fixedWidthString toUpper;
   reverse = x: concatStringsSep "" (reverseList (stringToCharacters x));
@@ -15,17 +15,264 @@ let
 
   bashbible = import ./bashbible.nix { inherit pkgs; };
   bundlers = import ./bundlers { inherit pkgs; };
+  carapaceSpec = pkgs.callPackage ./carapace-spec.nix { };
+  yamlFormat = pkgs.formats.yaml { };
   ignoreUnused = "# shellcheck disable=SC2329";
-  argumentName = argument:
+  mkParsingMode = name: { _pogParsingMode = name; };
+  parsingModes = {
+    interspersed = mkParsingMode "interspersed";
+    nonInterspersed = mkParsingMode "non-interspersed";
+    passthrough = mkParsingMode "passthrough";
+    disabled = mkParsingMode "disabled";
+  };
+  parsingModeNames = [ "interspersed" "non-interspersed" "passthrough" "disabled" ];
+  normalizeParsingMode = path: value:
+    let
+      mode =
+        if isString value then
+          value
+        else if builtins.isAttrs value
+          && value ? _pogParsingMode
+          && isString value._pogParsingMode then
+          value._pogParsingMode
+        else
+          null;
+    in
+    if value == null then
+      null
+    else if mode != null && builtins.elem mode parsingModeNames then
+      mode
+    else
+      throw "pog: '${path}' parsing must be interspersed, non-interspersed, passthrough, or disabled";
+  normalizeArgument = argument:
     if isString argument then
-      argument
+      {
+        name = argument;
+        description = "";
+        variadic = false;
+      }
     else if builtins.isAttrs argument
       && argument ? name
-      && isString argument.name then
-      argument.name
+      && isString argument.name
+      && isString (argument.description or "")
+      && builtins.isBool (argument.variadic or false) then
+      argument // {
+        description = argument.description or "";
+        variadic = argument.variadic or false;
+      }
     else
-      throw "pog: arguments must be strings or sets containing a string `name`";
-  normalizeArguments = map argumentName;
+      throw "pog: arguments must be strings or sets with a string `name`, string `description`, and boolean `variadic`";
+  normalizeArguments = map normalizeArgument;
+  encodeCompletion = completion:
+    replaceStrings [ "$" ] [ "\\u0024" ] (builtins.toJSON completion);
+  mkCompletion = kind: attributes: {
+    _pogCompletion = kind;
+  } // attributes;
+  completions = rec {
+    values = candidates: mkCompletion "values" { inherit candidates; };
+    files =
+      { extensions ? [ ]
+      , relativeTo ? null
+      }:
+      mkCompletion "files" { inherit extensions relativeTo; };
+    directories = { relativeTo ? null }:
+      mkCompletion "directories" { inherit relativeTo; };
+    executables =
+      { directories ? [ ]
+      , relativeTo ? null
+      }:
+      mkCompletion "executables" { inherit directories relativeTo; };
+    dynamic =
+      { script
+      , runtimeInputs ? [ ]
+      , cache ? null
+      }:
+      mkCompletion "dynamic" {
+        inherit script runtimeInputs cache;
+        legacy = "";
+      };
+    merge = sources: mkCompletion "merge" { inherit sources; };
+    list = { separator, completion }:
+      mkCompletion "modifier" {
+        inherit completion;
+        modifier = "list";
+        argument = separator;
+      };
+    uniqueList = { separator, completion }:
+      mkCompletion "modifier" {
+        inherit completion;
+        modifier = "uniquelist";
+        argument = separator;
+      };
+    multipart = { separators, completion }:
+      mkCompletion "modifier" {
+        inherit completion;
+        modifier = "multiparts";
+        argument = builtins.toJSON separators;
+      };
+    prefix = { prefix, completion }:
+      mkCompletion "modifier" {
+        inherit completion;
+        modifier = "prefix";
+        argument = prefix;
+      };
+    suffix = { suffix, completion }:
+      mkCompletion "modifier" {
+        inherit completion;
+        modifier = "suffix";
+        argument = suffix;
+      };
+    noSpace = { characters, completion }:
+      mkCompletion "modifier" {
+        inherit completion;
+        modifier = "nospace";
+        argument = concatStringsSep "" characters;
+      };
+    filterUsed = completion:
+      mkCompletion "modifier" {
+        inherit completion;
+        modifier = "filterargs";
+        argument = null;
+      };
+    withUsage = { usage, completion }:
+      mkCompletion "modifier" {
+        inherit completion;
+        modifier = "usage";
+        argument = usage;
+      };
+    message = message: mkCompletion "message" { inherit message; };
+    delegate = completionSpec: mkCompletion "delegate" { inherit completionSpec; };
+    rawCarapace = actions: mkCompletion "raw" { inherit actions; };
+  };
+  normalizeCandidate = candidate:
+    if isString candidate then
+      {
+        value = candidate;
+        description = "";
+        style = "";
+        tag = "";
+      }
+    else if builtins.isAttrs candidate
+      && candidate ? value
+      && isString candidate.value
+      && isString (candidate.description or "")
+      && isString (candidate.style or "")
+      && isString (candidate.tag or "") then
+      {
+        inherit (candidate) value;
+        description = candidate.description or "";
+        style = candidate.style or "";
+        tag = candidate.tag or "";
+      }
+    else
+      throw "pog: completion candidates must be strings or sets with a string `value`";
+  normalizeCompletion = legacy: completion:
+    if isString completion then
+      if completion == "" then
+        null
+      else if legacy == "argument" && completion == "files" then
+        completions.files { }
+      else
+        mkCompletion "dynamic" {
+          script = completion;
+          runtimeInputs = [ ];
+          cache = null;
+          inherit legacy;
+        }
+    else if builtins.isList completion then
+      completions.values completion
+    else if builtins.isAttrs completion && completion ? _pogCompletion then
+      completion
+    else
+      throw "pog: completion must be a legacy Bash string, a candidate list, or a value from `pog.completions`";
+  cacheSelector = selector:
+    if isString selector && builtins.elem selector [ "cwd" "value" ] then
+      selector
+    else if builtins.isAttrs selector && selector ? flag && isString selector.flag then
+      "flag:${selector.flag}"
+    else if builtins.isAttrs selector && selector ? argument && builtins.isInt selector.argument then
+      "argument:${toString selector.argument}"
+    else if builtins.isAttrs selector && selector ? env && isString selector.env then
+      "env:${selector.env}"
+    else
+      throw "pog: cache keys must be `cwd`, `value`, or sets containing `flag`, `argument`, or `env`";
+  relativeRoots = {
+    git-dir = "$gitdir";
+    git-worktree = "$gitworktree";
+    nix-profile = "$nixprofile";
+    temp = "$tempdir";
+    user-cache = "$usercachedir";
+    user-config = "$userconfigdir";
+    user-home = "$userhomedir";
+    xdg-cache = "$xdgcachehome";
+    xdg-config = "$xdgconfighome";
+  };
+  relativeToModifier = relativeTo:
+    if relativeTo == null || relativeTo == "cwd" then
+      [ ]
+    else if isString relativeTo && builtins.hasAttr relativeTo relativeRoots then
+      [ "$chdir(${builtins.getAttr relativeTo relativeRoots})" ]
+    else if builtins.isAttrs relativeTo && relativeTo ? path && isString relativeTo.path then
+      [ "$chdir(${relativeTo.path})" ]
+    else
+      throw "pog: `relativeTo` must name a supported root or contain a string `path`";
+  completionToCarapace = legacy: input:
+    let
+      completion = normalizeCompletion legacy input;
+      kind = if completion == null then "empty" else completion._pogCompletion;
+      renderVector = values:
+        if values == [ ] then "" else "(${builtins.toJSON values})";
+      renderDynamic =
+        let
+          cache = completion.cache or null;
+          cacheSeconds = if cache == null then 0 else cache.ttlSeconds or 0;
+          cacheBy = if cache == null then [ ] else map cacheSelector (cache.by or [ ]);
+          script =
+            if (completion.runtimeInputs or [ ]) == [ ] then
+              completion.script
+            else
+              ''
+                export PATH="${pkgs.lib.makeBinPath completion.runtimeInputs}:$PATH"
+                ${completion.script}
+              '';
+          config = {
+            inherit script cacheSeconds cacheBy;
+            legacy = completion.legacy or "";
+          };
+        in
+        if !isString completion.script then
+          throw "pog: dynamic completion `script` must be a string"
+        else if !builtins.isInt cacheSeconds || cacheSeconds < 0 then
+          throw "pog: completion cache `ttlSeconds` must be a non-negative integer"
+        else
+          [ "$pogDynamic(${encodeCompletion config})" ];
+    in
+    if kind == "empty" then
+      [ ]
+    else if kind == "values" then
+      [ "$pogValues(${encodeCompletion (map normalizeCandidate completion.candidates)})" ]
+    else if kind == "files" then
+      [ "$files${renderVector completion.extensions}" ] ++ relativeToModifier completion.relativeTo
+    else if kind == "directories" then
+      [ "$directories" ] ++ relativeToModifier completion.relativeTo
+    else if kind == "executables" then
+      [ "$executables${renderVector completion.directories}" ] ++ relativeToModifier completion.relativeTo
+    else if kind == "dynamic" then
+      renderDynamic
+    else if kind == "merge" then
+      concatLists (map (completionToCarapace "") completion.sources)
+    else if kind == "modifier" then
+      completionToCarapace "" completion.completion ++ [
+        ("$" + completion.modifier + (if completion.argument == null then "" else "(${completion.argument})"))
+      ]
+    else if kind == "message" then
+      [ "$message(${completion.message})" ]
+    else if kind == "delegate" then
+      [ "$spec(${toString completion.completionSpec})" ]
+    else if kind == "raw" && builtins.isList completion.actions && builtins.all isString completion.actions then
+      completion.actions
+    else
+      throw "pog: unsupported completion kind `${kind}`";
   formatAndCheckBash = path: ''
     shfmt -w -ln bash -i 2 -ci -sr "${path}"
     bash -n "${path}"
@@ -34,7 +281,7 @@ let
   '';
 in
 rec {
-  overlay = final: prev: { inherit pog; };
+  overlay = _final: _prev: { inherit pog; };
   _ = with pkgs; let
     core = "${pkgs.coreutils}/bin";
   in
@@ -510,6 +757,8 @@ rec {
   writeBashBinCheckedWithFlags = pog;
   pog = {
     inherit (bundlers) toAppImage toArx toHostScript;
+    inherit completions;
+    parsing = parsingModes;
     helpers = rec {
       fn = {
         add = "${_.awk} '{print $1 + $2}'";
@@ -586,9 +835,16 @@ rec {
     , description ? "a helpful bash script with flags, created through nix + pog!"
     , flags ? [ ]
     , parsedFlags ? map flag flags
+    , persistentFlags ? [ ]
+    , parsedPersistentFlags ? map (definition: flag (definition // { persistent = true; })) persistentFlags
+    , exclusiveFlags ? [ ]
     , arguments ? [ ]
     , argumentCompletion ? "files"
     , commands ? [ ]
+    , aliases ? [ ]
+    , group ? ""
+    , hidden ? false
+    , parsing ? null
     , runtimeInputs ? [ ]
     , hostCommands ? [ ]
     , bashBible ? false
@@ -606,22 +862,53 @@ rec {
       shortHelpDoc = if shortDefaultFlags then "-h, " else "";
       shortVerboseDoc = if shortDefaultFlags then "-v, " else "";
       defaultFlagHelp = if showDefaultFlags then "[${shortHelp}--help] [${shortVerbose}--verbose] [--no-color] " else "";
-      argumentNames = normalizeArguments arguments;
-
       # clap-style subcommands: when `commands` is non-empty the binary becomes a
       # recursive dispatcher. each command node is the same shape as a pog call
       # (name/description/flags/arguments/script) and may itself contain `commands`.
-      hasCommands = commands != [ ];
       sanitize = replaceStrings [ "-" ] [ "_" ];
       sanitizePath = p: concatStringsSep "__" (map sanitize p);
 
       # build one tree node; reuses the exact per-flag outputs of `flag`
-      mkNode = path: spec:
+      mkNode = path: inheritedPersistentFlags: spec:
         let
           nodePath = path ++ [ spec.name ];
-          nodeFlags = spec.parsedFlags or (map flag (spec.flags or [ ]));
+          localFlags = spec.parsedFlags or (map flag (spec.flags or [ ]));
+          ownPersistentFlags = spec.parsedPersistentFlags or (
+            map
+              (definition: flag (definition // { persistent = true; }))
+              (spec.persistentFlags or [ ])
+          );
+          declaredFlags = localFlags ++ ownPersistentFlags;
+          rawNodeFlags = inheritedPersistentFlags ++ declaredFlags;
+          flagNames = map (nodeFlag: nodeFlag.cliName) rawNodeFlags;
+          shortFlagNames = filter (short: short != "") (map (nodeFlag: nodeFlag.short) rawNodeFlags);
+          nodeFlags =
+            if builtins.length flagNames != builtins.length (pkgs.lib.unique flagNames) then
+              throw "pog: '${concatStringsSep " " nodePath}' has duplicate long flag names"
+            else if builtins.length shortFlagNames != builtins.length (pkgs.lib.unique shortFlagNames) then
+              throw "pog: '${concatStringsSep " " nodePath}' has duplicate short flag names"
+            else
+              rawNodeFlags;
           children = spec.commands or [ ];
           isParent = children != [ ];
+          nodeAliases =
+            if builtins.isList (spec.aliases or [ ])
+              && builtins.all isString (spec.aliases or [ ]) then
+              spec.aliases or [ ]
+            else
+              throw "pog: '${concatStringsSep " " nodePath}' aliases must be strings";
+          nodeGroup = spec.group or "";
+          nodeHidden = spec.hidden or false;
+          requestedParsing = normalizeParsingMode pathStr (spec.parsing or null);
+          nodeParsing =
+            if requestedParsing == null then
+              if isParent then "non-interspersed" else "interspersed"
+            else if isParent && requestedParsing == "interspersed" then
+              throw "pog: '${concatStringsSep " " nodePath}' cannot use interspersed parsing while dispatching subcommands"
+            else if isParent && requestedParsing == "passthrough" then
+              throw "pog: '${concatStringsSep " " nodePath}' cannot use passthrough parsing while dispatching subcommands"
+            else
+              requestedParsing;
           nodeArgs = normalizeArguments (spec.arguments or [ ]);
           nodeDesc = spec.description or "a pog command";
           rawScript = spec.script or "";
@@ -636,28 +923,221 @@ rec {
             if hasBeforeExit then ''
               ${ignoreUnused}
               ${exitFn}() {
-              ${_ind 1 nodeBeforeExit}
+              ${nodeBeforeExit}
               }
             '' else "";
           register = if hasBeforeExit then "_pog_cleanup_fns+=(${exitFn})" else "";
           fnName = "_pog_cmd_" + sanitizePath nodePath;
           helpFn = "_pog_help_" + sanitizePath nodePath;
           pathStr = concatStringsSep " " nodePath;
-          childNodes = map (mkNode nodePath) children;
-          childFn = c: "_pog_cmd_" + sanitizePath (nodePath ++ [ c.name ]);
+          childNodes = map (mkNode nodePath (inheritedPersistentFlags ++ ownPersistentFlags)) children;
+          childCommandNames = concatLists (map (child: [ child.name ] ++ child.aliases) childNodes);
+          checkedChildNodes =
+            if builtins.length childCommandNames != builtins.length (pkgs.lib.unique childCommandNames) then
+              throw "pog: '${pathStr}' has duplicate subcommand names or aliases"
+            else
+              childNodes;
+          completionFlags = listToAttrs
+            (
+              map
+                (nodeFlag: nameValuePair nodeFlag.carapaceName nodeFlag.description)
+                localFlags
+            ) // {
+            "${if shortDefaultFlags then "-h, " else ""}--help" = "print this help and exit";
+            "${if shortDefaultFlags then "-v, " else ""}--verbose" = "enable verbose logging and info";
+            "--no-color" = "disable color and other formatting";
+          };
+          persistentCompletionFlags = listToAttrs (
+            map
+              (nodeFlag: nameValuePair nodeFlag.carapaceName nodeFlag.description)
+              ownPersistentFlags
+          );
+          flagCompletions = listToAttrs (
+            map
+              (nodeFlag: nameValuePair nodeFlag.cliName nodeFlag.carapaceCompletion)
+              (filter (nodeFlag: nodeFlag.carapaceCompletion != null) nodeFlags)
+          );
+          fallbackCompletion = spec.argumentCompletion or "files";
+          variadicArguments = filter (argument: argument.variadic) nodeArgs;
+          checkedArguments =
+            if builtins.length variadicArguments > 1 then
+              throw "pog: '${pathStr}' has more than one variadic argument"
+            else if variadicArguments != [ ] && !(builtins.elemAt nodeArgs (builtins.length nodeArgs - 1)).variadic then
+              throw "pog: '${pathStr}' has a variadic argument that is not last"
+            else
+              nodeArgs;
+          hasVariadicArgument = checkedArguments != [ ]
+            && (builtins.elemAt checkedArguments (builtins.length checkedArguments - 1)).variadic;
+          fixedArguments =
+            if hasVariadicArgument then
+              builtins.genList
+                (index: builtins.elemAt checkedArguments index)
+                (builtins.length checkedArguments - 1)
+            else
+              checkedArguments;
+          argumentCompletionActions = argument:
+            completionToCarapace "argument" (argument.completion or fallbackCompletion)
+            ++ pkgs.lib.optional (argument.description != "") "$usage(${argument.description})";
+          positionalCompletion =
+            if isParent then
+              [ ]
+            else
+              map argumentCompletionActions fixedArguments;
+          positionalAnyCompletion =
+            if isParent then
+              [ ]
+            else if hasVariadicArgument then
+              argumentCompletionActions
+                (builtins.elemAt checkedArguments (builtins.length checkedArguments - 1))
+            else
+              completionToCarapace "argument" fallbackCompletion;
+          rawExclusiveFlags = spec.exclusiveFlags or [ ];
+          exclusiveFlagNames = concatLists rawExclusiveFlags;
+          checkedExclusiveFlags =
+            if !builtins.isList rawExclusiveFlags
+              || !(builtins.all
+              (flagGroup: builtins.isList flagGroup && builtins.all isString flagGroup)
+              rawExclusiveFlags) then
+              throw "pog: '${pathStr}' exclusive flag groups must be lists of flag names"
+            else if !(builtins.all (flagName: builtins.elem flagName flagNames) exclusiveFlagNames) then
+              throw "pog: '${pathStr}' has an exclusive group containing an unknown flag"
+            else
+              rawExclusiveFlags;
+          flagByName = flagName:
+            builtins.head (filter (nodeFlag: nodeFlag.cliName == flagName) nodeFlags);
+          exclusiveChecks = concatStringsSep "\n" (map
+            (flagGroup: ''
+              local _pog_exclusive_count=0
+              ${concatStringsSep "\n" (map
+                (flagName:
+                  let nodeFlag = flagByName flagName;
+                  in ''
+                    if [[ ''${${nodeFlag.seenName}:-0} -eq 1 ]]; then
+                      _pog_exclusive_count=$((_pog_exclusive_count + 1))
+                    fi
+                  '')
+                flagGroup)}
+              if [[ $_pog_exclusive_count -gt 1 ]]; then
+                die "flags ${concatStringsSep ", " (map (flagName: "--${flagName}") flagGroup)} are mutually exclusive" 2
+              fi
+            '')
+            checkedExclusiveFlags);
+          passthroughShortFlags = filter (nodeFlag: nodeFlag.short != "") nodeFlags;
+          passthroughShortNames =
+            pkgs.lib.optionals shortDefaultFlags [ "h" "v" ]
+            ++ map (nodeFlag: nodeFlag.short) passthroughShortFlags;
+          passthroughParser = ''
+              local -a _pog_passthrough_args=()
+              local _pog_cluster _pog_cluster_char _pog_cluster_consume_next
+              local _pog_cluster_known _pog_cluster_value _pog_index
+              while [[ $# -gt 0 ]]; do
+                case "$1" in
+                  --)
+                    shift
+                    _pog_passthrough_args+=("$@")
+                    break
+                    ;;
+                  ${if shortDefaultFlags then "-h | " else ""}--help)
+                    ${helpFn}
+                    ;;
+                  ${if shortDefaultFlags then "-v | " else ""}--verbose)
+                    VERBOSE=1
+                    shift
+                    ;;
+                  --no-color)
+                    NO_COLOR=1
+                    shift
+                    ;;
+            ${_ind 4 (concatStringsSep "\n" (map (nodeFlag: nodeFlag.passthroughCases) nodeFlags))}
+                  -)
+                    _pog_passthrough_args+=("$1")
+                    shift
+                    ;;
+                  -*)
+                    _pog_cluster="''${1#-}"
+                    _pog_cluster_known=1
+                    ${if passthroughShortNames == [ ] then
+                      "_pog_cluster_known=0"
+                    else ''
+                      for (( _pog_index = 0; _pog_index < ''${#_pog_cluster}; _pog_index++ )); do
+                        _pog_cluster_char="''${_pog_cluster:_pog_index:1}"
+                        case "$_pog_cluster_char" in
+                          ${if shortDefaultFlags then "h | v) ;;" else ""}
+            ${_ind 8 (concatStringsSep "\n" (map (nodeFlag: nodeFlag.passthroughShortValidationCase) passthroughShortFlags))}
+                          *)
+                            _pog_cluster_known=0
+                            break
+                            ;;
+                        esac
+                      done
+                    ''}
+                    if [[ $_pog_cluster_known -eq 1 ]]; then
+                      _pog_cluster_consume_next=0
+                      for (( _pog_index = 0; _pog_index < ''${#_pog_cluster}; _pog_index++ )); do
+                        _pog_cluster_char="''${_pog_cluster:_pog_index:1}"
+                        case "$_pog_cluster_char" in
+                          ${if shortDefaultFlags then ''
+                            h) ${helpFn} ;;
+                            v) VERBOSE=1 ;;
+                          '' else ""}
+            ${_ind 8 (concatStringsSep "\n" (map (nodeFlag: nodeFlag.passthroughShortCase) passthroughShortFlags))}
+                        esac
+                      done
+                      if [[ $_pog_cluster_consume_next -eq 1 ]]; then
+                        shift 2
+                      else
+                        shift
+                      fi
+                    else
+                      _pog_passthrough_args+=("$1")
+                      shift
+                    fi
+                    ;;
+                  *)
+                    _pog_passthrough_args+=("$1")
+                    shift
+                    ;;
+                esac
+              done
+              set -- "''${_pog_passthrough_args[@]}"
+          '';
           # a child may mark itself `default = true`; bare invocation of this node
           # then forwards to that child instead of running a script or printing help.
           # the forward chains, so a default child that is itself a parent with its
           # own default subcommand keeps descending.
-          defaultChildren = filter (c: c.default or false) children;
+          defaultChildren = filter (child: child.default) checkedChildNodes;
           defaultChild =
             if defaultChildren == [ ] then null
             else if builtins.length defaultChildren > 1
             then throw "pog: '${pathStr}' has more than one subcommand marked `default = true`"
             else builtins.head defaultChildren;
           hasDefaultChild = defaultChild != null;
-          usageTail = if isParent then "<COMMAND>" else concatStringsSep " " (map toUpper nodeArgs);
-          childHelp = concatStringsSep "\n" (map (c: "${rightPad flagPadding c.name}\t${c.description or "a pog command"}${if (c.default or false) then " (default)" else ""}") children);
+          usageTail = if isParent then "<COMMAND>" else
+          concatStringsSep " " (
+            map
+              (argument: "${toUpper argument.name}${if argument.variadic then "..." else ""}")
+              checkedArguments
+          );
+          argumentHelp = concatStringsSep "\n" (map
+            (argument:
+              "${rightPad flagPadding (toUpper argument.name + (if argument.variadic then "..." else ""))}"
+              + "\t${argument.description}")
+            (filter (argument: argument.description != "") checkedArguments));
+          visibleChildren = filter (child: !child.hidden) checkedChildNodes;
+          childGroups = pkgs.lib.unique (map (child: child.group) visibleChildren);
+          childHelp = concatStringsSep "\n" (map
+            (childGroup:
+              let
+                groupedChildren = filter (child: child.group == childGroup) visibleChildren;
+                entries = concatStringsSep "\n" (map
+                  (child:
+                    "${rightPad flagPadding child.name}\t${child.description}"
+                    + "${if child.aliases == [ ] then "" else " [aliases: ${concatStringsSep ", " child.aliases}]"}"
+                    + "${if child.default then " (default)" else ""}")
+                  groupedChildren);
+              in
+              if childGroup == "" then entries else "${childGroup}:\n${ind entries}")
+            childGroups);
           # what runs when this node is invoked bare (no subcommand). a node's own
           # `script` and a default subcommand are both "bare action" behaviours, so
           # allowing both would be ambiguous — reject it at eval time.
@@ -665,11 +1145,13 @@ rec {
             if hasScript && hasDefaultChild
             then throw "pog: '${pathStr}' sets both a `script` and a `default = true` subcommand; pick one"
             else if hasScript then nodeScript
-            else if hasDefaultChild then ''${childFn defaultChild} "$@"''
+            else if hasDefaultChild then ''${defaultChild.fnName} "$@"''
             else helpFn;
           dispatch = ''
             case "''${1:-}" in
-            ${concatStringsSep "\n" (map (c: ''${c.name}) shift; ${childFn c} "$@" ;;'') children)}
+            ${concatStringsSep "\n" (map
+              (child: ''${concatStringsSep "|" ([ child.name ] ++ child.aliases)}) shift; ${child.fnName} "$@" ;;'')
+              checkedChildNodes)}
             "")
             ${bareAction}
             ;;
@@ -685,22 +1167,26 @@ rec {
               # help is a no-op meta action; drop the trap so no exit hooks fire
               trap - SIGINT SIGTERM ERR EXIT
               ${pkgs.coreutils}/bin/cat <<EOF
-              Usage: ${pathStr} ${defaultFlagHelp}${concatStringsSep " " (map (x: x.ex) nodeFlags)} ${usageTail}
+              Usage: ${pathStr} ${defaultFlagHelp}${concatStringsSep " " (map (x: x.ex) (filter (nodeFlag: !nodeFlag.hidden) nodeFlags))} ${usageTail}
 
               ${nodeDesc}
 
               Flags:
-            ${ind (concatStringsSep "\n" (map (x: x.helpDoc) nodeFlags))}
+            ${ind (concatStringsSep "\n" (map (x: x.helpDoc) (filter (nodeFlag: !nodeFlag.hidden) nodeFlags)))}
               ${rightPad flagPadding "${shortHelpDoc}--help"}${"\t"}print this help and exit
               ${rightPad flagPadding "${shortVerboseDoc}--verbose"}${"\t"}enable verbose logging and info
-              ${rightPad flagPadding "--no-color"}${"\t"}disable color and other formatting${if isParent then "\n\n  Commands:\n" + ind childHelp else ""}
+              ${rightPad flagPadding "--no-color"}${"\t"}disable color and other formatting${if argumentHelp == "" then "" else "\n\n  Arguments:\n" + ind argumentHelp}${if isParent then "\n\n  Commands:\n" + ind childHelp else ""}
             EOF
               exit 0
             }
             ${ignoreUnused}
             ${fnName}() {
+              # shellcheck disable=SC2034
+            ${_ind 3 (concatStringsSep "\n" (map (x: x.flagDefault) declaredFlags))}
+            ${_ind 3 (concatStringsSep "\n" (map (x: x.seenDefault) declaredFlags))}
+            ${if nodeParsing == "disabled" then "" else if nodeParsing == "passthrough" then passthroughParser else ''
               local OPTIONS LONGOPTS PARSED
-              OPTIONS="${if isParent then "+" else ""}${if shortDefaultFlags then "h,v," else ""}${concatStringsSep "," (map (x: x.shortOpt) nodeFlags)}"
+              OPTIONS="${if nodeParsing == "non-interspersed" then "+" else ""}${if shortDefaultFlags then "h,v," else ""}${concatStringsSep "," (map (x: x.shortOpt) nodeFlags)}"
               LONGOPTS="help,no-color,verbose,${concatStringsSep "," (map (x: x.longOpt) nodeFlags)}"
               # shellcheck disable=SC2251
               ! PARSED=$(${_.getopt} --options=$OPTIONS --longoptions=$LONGOPTS --name "${spec.name}" -- "$@")
@@ -708,8 +1194,6 @@ rec {
                 exit 2
               fi
               eval set -- "$PARSED"
-              # shellcheck disable=SC2034
-            ${_ind 3 (concatStringsSep "\n" (map (x: x.flagDefault) nodeFlags))}
               while true; do
                 case "$1" in
                   ${shortHelp}--help)
@@ -732,27 +1216,61 @@ rec {
                     echo "unknown flag passed"
                     exit 3
                     ;;
-                esac
-              done
+                  esac
+                done
+            ''}
+            ${_ind 3 exclusiveChecks}
             ${_ind 3 register}
-            ${_ind 3 (concatStringsSep "\n" (filterBlank (map (x: x.flagPrompt) nodeFlags)))}
-            ${_ind 3 body}
+            ${_ind 3 (concatStringsSep "\n" (filterBlank (map (x: x.flagPrompt) declaredFlags)))}
+            # User code stays unindented so literal heredoc terminators remain valid.
+            ${body}
             }
           '';
           self = {
-            inherit fnName fnText pathStr isParent;
-            argComp = spec.argumentCompletion or "files";
-            childNames = map (c: c.name) children;
-            flagList = "${if shortDefaultFlags then "-h -v " else ""}${concatStringsSep " " (map (x: "-${x.short}") (filter (x: x.short != "") nodeFlags))} --help --verbose --no-color ${concatStringsSep " " (map (x: "--${x.cliName or x.name}") nodeFlags)}";
-            completionBlocks = concatStringsSep "\n" (map (x: x.completionBlock) nodeFlags);
+            inherit fnName fnText pathStr isParent nodeFlags declaredFlags checkedExclusiveFlags;
+            inherit (spec) name;
+            aliases = nodeAliases;
+            description = nodeDesc;
+            group = nodeGroup;
+            hidden = nodeHidden;
+            default = spec.default or false;
+            parsing = nodeParsing;
+            carapace = {
+              inherit (spec) name;
+              aliases = nodeAliases;
+              description = nodeDesc;
+              group = nodeGroup;
+              hidden = nodeHidden;
+              flags = completionFlags;
+              persistentflags = persistentCompletionFlags;
+              exclusiveflags = checkedExclusiveFlags;
+              completion = optionalAttrs (flagCompletions != { })
+                {
+                  flag = flagCompletions;
+                }
+              // optionalAttrs (positionalCompletion != [ ]) {
+                positional = positionalCompletion;
+              }
+              // optionalAttrs (positionalAnyCompletion != [ ]) {
+                positionalany = positionalAnyCompletion;
+              };
+              commands = map (node: node.carapace) checkedChildNodes;
+            } // optionalAttrs (requestedParsing != null && nodeParsing != "passthrough") {
+              parsing = nodeParsing;
+            };
           };
         in
-        self // { all = [ self ] ++ concatLists (map (n: n.all) childNodes); };
+        self // { all = [ self ] ++ concatLists (map (node: node.all) checkedChildNodes); };
 
-      rootNode = mkNode [ ] {
-        inherit name description flags parsedFlags arguments argumentCompletion script commands beforeExit;
+      rootNode = mkNode [ ] [ ] {
+        inherit
+          name description flags parsedFlags persistentFlags parsedPersistentFlags exclusiveFlags
+          arguments argumentCompletion script commands aliases group hidden parsing beforeExit
+          ;
       };
       allNodes = rootNode.all;
+      hasPassthrough = builtins.any (node: node.parsing == "passthrough") allNodes;
+      completionSpec = yamlFormat.generate "${name}-carapace-spec.yaml" rootNode.carapace;
 
       commandsText = ''
         # shellcheck disable=SC2317
@@ -815,270 +1333,91 @@ rec {
         ${rootNode.fnName} "$@"
       '';
 
-      commandsCompletion =
-        let
-          childArm = n: ''["${n.pathStr}"]="${concatStringsSep " " n.childNames}"'';
-          flagArm = n: ''["${n.pathStr}"]="${n.flagList}"'';
-          valueArm = n: ''
-            "${n.pathStr}")
-            if [[ $current = -* ]]; then :
-            ${n.completionBlocks}
-            fi
-            ;;'';
-          argArm = n: ''
-            "${n.pathStr}")
-            completions=$(${n.argComp} "$current")
-            # shellcheck disable=SC2207
-            COMPREPLY=( $(compgen -W "$completions" -- "$current") )
-            ;;'';
-          customArgNodes = filter (n: !n.isParent && n.argComp != "files") allNodes;
-        in
-        ''
-          #!/bin/bash
-          # shellcheck disable=SC2317
-          _${name}()
-          {
-            # shellcheck disable=SC2034
-            local current previous completions node i word
-            declare -A _pog_children=(
-            ${_ind 3 (concatStringsSep "\n" (map childArm allNodes))}
-            )
-            declare -A _pog_flags=(
-            ${_ind 3 (concatStringsSep "\n" (map flagArm allNodes))}
-            )
-            COMPREPLY=()
-            current="''${COMP_WORDS[COMP_CWORD]}"
-            # previous is only read by per-flag completion blocks; unused if no node has flags
-            # shellcheck disable=SC2034
-            previous="''${COMP_WORDS[COMP_CWORD-1]}"
-
-            node="${name}"
-            for (( i=1; i<COMP_CWORD; i++ )); do
-              word="''${COMP_WORDS[i]}"
-              [[ $word == -* ]] && continue
-              if [[ " ''${_pog_children[$node]:-} " == *" $word "* ]]; then
-                node="$node $word"
-              fi
-            done
-
-            if [[ $current = -* ]]; then
-              # shellcheck disable=SC2207
-              COMPREPLY=( $(compgen -W "''${_pog_flags[$node]:-}" -- "$current") )
-              return 0
-            fi
-
-            case "$node" in
-            ${_ind 3 (concatStringsSep "\n" (map valueArm allNodes))}
-            esac
-            if [[ ''${#COMPREPLY[@]} -gt 0 ]]; then
-              return 0
-            fi
-
-            if [[ -n "''${_pog_children[$node]:-}" ]]; then
-              # shellcheck disable=SC2207
-              COMPREPLY=( $(compgen -W "''${_pog_children[$node]}" -- "$current") )
-            else
-              case "$node" in
-            ${_ind 3 (concatStringsSep "\n" (map argArm customArgNodes))}
-              *)
-                compopt -o default
-                COMPREPLY=()
-                ;;
-              esac
-            fi
-            return 0
-          }
-          complete -F _${name} ${name}
-        '';
     in
     pkgs.stdenv.mkDerivation (finalAttrs: {
       inherit version;
       pname = name;
       dontUnpack = true;
       nativeBuildInputs = [
+        carapaceSpec
         pkgs.bash
         pkgs.installShellFiles
+        pkgs.lua
         pkgs.shellcheck
         pkgs.shfmt
       ];
-      passAsFile = [
-        "text"
-        "completion"
-      ];
-      text = if hasCommands then commandsText else ''
-        # shellcheck disable=SC2317
-        ${if strict then "set -o errexit -o pipefail -o noclobber" else ""}
-        VERBOSE="''${POG_VERBOSE-}"
-        NO_COLOR="''${POG_NO_COLOR-}"
-        export PATH="${pkgs.lib.makeBinPath runtimeInputs}:$PATH"
-
-        help() {
-          ${pkgs.coreutils}/bin/cat <<EOF
-          Usage: ${name} ${defaultFlagHelp}${concatStringsSep " " (map (x: x.ex) parsedFlags)} ${concatStringsSep " " (map toUpper argumentNames)}
-
-          ${description}
-
-          Flags:
-        ${ind (concatStringsSep "\n" (map (x: x.helpDoc) parsedFlags))}
-          ${rightPad flagPadding "${shortHelpDoc}--help"}${"\t"}print this help and exit
-          ${rightPad flagPadding "${shortVerboseDoc}--verbose"}${"\t"}enable verbose logging and info
-          ${rightPad flagPadding "--no-color"}${"\t"}disable color and other formatting
-        EOF
-          exit 0
-        }
-      
-        setup_colors() {
-          if [[ -t 2 ]] && [[ -z "''$NO_COLOR" ]] && [[ "''$TERM" != "dumb" ]]; then
-            ${concatStringsSep " " (map (x: ''${toUpper x.name}="${x.code}"'') bashColors)}
-          else
-            ${concatStringsSep " " (map (x: ''${toUpper x.name}=""'') bashColors)}
-          fi
-        }
-
-        OPTIONS="${if shortDefaultFlags then "h,v," else ""}${concatStringsSep "," (map (x: x.shortOpt) parsedFlags)}"
-        LONGOPTS="help,no-color,verbose,${concatStringsSep "," (map (x: x.longOpt) parsedFlags)}"
-
-        # shellcheck disable=SC2251
-        ! PARSED=$(${_.getopt} --options=$OPTIONS --longoptions=$LONGOPTS --name "$0" -- "$@")
-        if [[ ''${PIPESTATUS[0]} -ne 0 ]]; then
-            exit 2
-        fi
-        eval set -- "$PARSED"
-
-        # defaults
-        ${concatStringsSep "\n" (map (x: x.flagDefault) parsedFlags)}
-
-        while true; do
-          case "$1" in
-            ${shortHelp}--help)
-                help
-                ;;
-            ${shortVerbose}--verbose)
-                VERBOSE=1
-                shift
-                ;;
-            --no-color)
-                NO_COLOR=1
-                shift
-                ;;
-        ${_ind 2 (concatStringsSep "\n" (map (x: x.definition) parsedFlags))}
-            --)
-                shift
-                break
-                ;;
-            *)
-                echo "unknown flag passed"
-                exit 3
-                ;;
-          esac
-        done
-        # shellcheck disable=SC2329
-        debug() {
-          if [ -n "$VERBOSE" ]; then
-            echo -e "''${PURPLE}$1''${RESET}" >&2
-          fi
-        }
-        ${ignoreUnused}
-        cleanup() {
-          trap - SIGINT SIGTERM ERR EXIT
-        ${ind beforeExit}
-        }
-        ${ignoreUnused}
-        _pog_signal() {
-          local status=$1
-          cleanup
-          exit "$status"
-        }
-        trap '_pog_signal 130' SIGINT
-        trap '_pog_signal 143' SIGTERM
-        trap cleanup ERR EXIT
-
-        ${concatStringsSep "\n" (map (x: ''
-          ${ignoreUnused}
-          ${x.name}(){
-            echo -e "''${${toUpper x.name}}$1''${RESET}"
-          }
-        '') bashColors)}
-
-        # shellcheck disable=SC2329
-        die() {
-          local msg=$1
-          local code=''${2-1}
-          echo >&2 -e "''${RED}$msg''${RESET}"
-          exit "$code"
-        }
-        setup_colors
-        ${if bashBible then bashbible.bible else ""}
-        ${concatStringsSep "\n" (filterBlank (map (x: x.flagPrompt) parsedFlags))}
-        # script
-        ${if builtins.isFunction script then script helpers else script}
-      '';
-      completion = if hasCommands then commandsCompletion else
-      (
-        let
-          argCompletion =
-            if argumentCompletion == "files" then ''
-              compopt -o default
-              COMPREPLY=()
-            '' else ''
-              completions=$(${argumentCompletion} "$current")
-              # shellcheck disable=SC2207
-              COMPREPLY=( $(compgen -W "$completions" -- "$current") )
-            '';
-        in
-        ''
-          #!/bin/bash
-          # shellcheck disable=SC2317
-          _${name}()
-          {
-            local current previous completions
-            compopt +o default
-
-            flags(){
-              echo "\
-                ${if shortDefaultFlags then "-h -v " else ""}${concatStringsSep " " (map (x: "-${x.short}") (filter (x: x.short != "") parsedFlags))} \
-                --help --verbose --no-color ${concatStringsSep " " (map (x: "--${x.cliName or x.name}") parsedFlags)}"
-            }
-            # shellcheck disable=SC2329
-            executables(){
-              echo -n "$PATH" |
-                ${_.xargs} -d: -I{} -r -- find -L {} -maxdepth 1 -mindepth 1 -type f -executable -printf '%P\n' 2>/dev/null |
-                ${_.sort} -u
-            }
-
-            COMPREPLY=()
-            current="''${COMP_WORDS[COMP_CWORD]}"
-            previous="''${COMP_WORDS[COMP_CWORD-1]}"
-
-            if [[ $current = -* ]]; then
-              completions=$(flags)
-              # shellcheck disable=SC2207
-              COMPREPLY=( $(compgen -W "$completions" -- "$current") )
-            ${concatStringsSep "\n" (map (x: x.completionBlock) parsedFlags)}
-            elif [[ $COMP_CWORD = 1 ]] || [[ $previous = -* && $COMP_CWORD = 2 ]]; then
-              ${argCompletion}
-            else
-              compopt -o default
-              COMPREPLY=()
-            fi
-            return 0
-          }
-          complete -F _${name} ${name}
-        ''
-      );
+      passAsFile = [ "text" ];
+      text = commandsText;
       installPhase = ''
         mkdir -p $out/bin
         echo '#!/bin/bash' >$out/bin/${name}
         cat $textPath >>$out/bin/${name}
         chmod +x $out/bin/${name}
-        cp "$completionPath" completion.bash
         ${formatAndCheckBash "$out/bin/${name}"}
-        ${formatAndCheckBash "completion.bash"}
-        installShellCompletion --bash --name ${name} completion.bash
+
+        spec=$out/share/carapace/specs/${name}.yaml
+        install -Dm644 ${completionSpec} "$spec"
+        completion_command=$out/bin/_${name}_complete
+        cat > "$completion_command" <<EOF
+        #!/bin/bash
+        ${if hasPassthrough then "export CARAPACE_LENIENT=1" else ""}
+        exec ${carapaceSpec}/bin/carapace-spec "$spec" "\$@"
+        EOF
+        chmod +x "$completion_command"
+        ${formatAndCheckBash "$completion_command"}
+
+        completion_root=$out/share/pog/completions
+
+        generate_completion() {
+          local shell=$1
+          local extension=$2
+          local target=$completion_root/$shell/${name}.$extension
+
+          mkdir -p "$(dirname "$target")"
+          ${carapaceSpec}/bin/carapace-spec "$spec" "$shell" > "$target"
+          test -s "$target"
+          if [[ $shell == xonsh ]]; then
+            substituteInPlace "$target" \
+              --replace-fail "'carapace-spec', '$spec'," "'$completion_command',"
+          else
+            substituteInPlace "$target" \
+              --replace-fail "carapace-spec '$spec'" "$completion_command"
+          fi
+          substituteInPlace "$target" \
+            --replace-quiet "xargs $completion_command" "${pkgs.findutils}/bin/xargs $completion_command" \
+            --replace-quiet "| sed " "| ${pkgs.gnused}/bin/sed "
+        }
+
+        generate_completion bash bash
+        generate_completion bash-ble bash
+        generate_completion cmd-clink lua
+        generate_completion elvish elv
+        generate_completion fish fish
+        generate_completion nushell nu
+        generate_completion oil oil
+        generate_completion powershell ps1
+        generate_completion tcsh csh
+        generate_completion xonsh py
+        generate_completion zsh zsh
+        # Avoid inserting a second separator when completing before existing text.
+        substituteInPlace "$completion_root/zsh/${name}.zsh" \
+          --replace-fail '    [[ ''${#valuesArr[@]} -gt 1 ]]' \
+          '    [[ ''${RBUFFER:-} != [[:space:]]* ]] || valuesArr=("''${valuesArr[@]% }")
+            [[ ''${#valuesArr[@]} -gt 1 ]]'
+
+        bash -n "$completion_root/bash/${name}.bash"
+        ${pkgs.lua}/bin/luac -p "$completion_root/cmd-clink/${name}.lua"
+        installShellCompletion --bash --name ${name} "$completion_root/bash/${name}.bash"
+        installShellCompletion --fish --name ${name}.fish "$completion_root/fish/${name}.fish"
+        installShellCompletion --zsh --name _${name} "$completion_root/zsh/${name}.zsh"
+        install -Dm644 "$completion_root/nushell/${name}.nu" \
+          "$out/share/nushell/vendor/autoload/${name}.nu"
       '';
       passthru = {
         pog = {
-          inherit hostCommands runtimeInputs;
+          inherit carapaceSpec hostCommands runtimeInputs;
+          completionSpec = "${finalAttrs.finalPackage}/share/carapace/specs/${name}.yaml";
+          completionCommand = "${finalAttrs.finalPackage}/bin/_${name}_complete";
         };
         toArx = pog.toArx finalAttrs.finalPackage;
         toAppImage = pog.toAppImage finalAttrs.finalPackage;
@@ -1098,7 +1437,11 @@ rec {
     , default ? ""
     , hasDefault ? (stringLength default) > 0
     , bool ? false
-    , marker ? if bool then "" else ":"
+    , optionalValue ? false
+    , repeatable ? false
+    , hidden ? false
+    , persistent ? false
+    , marker ? if bool then "" else if optionalValue then "::" else ":"
     , description ? "a flag"
     , argument ? "VAR"
     , envVar ? "POG_" + (replaceStrings [ "-" ] [ "_" ] (toUpper name))
@@ -1108,45 +1451,185 @@ rec {
     , promptErrorExitCode ? 3
     , hasPrompt ? (stringLength prompt) > 0
     , completion ? ""
-    , hasCompletion ? (stringLength completion) > 0
+    , hasCompletion ? !(isString completion && completion == "")
     , flagPadding ? 20
-    }: {
-      inherit short default bool marker description;
-      cliName = name;
-      name = _name;
-      shortOpt = "${short}${marker}";
-      longOpt = "${name}${marker}";
-      flagDefault = ''${_name}="''${${envVar}:-${default}}"'';
-      flagPrompt =
-        if hasPrompt then ''
-          [ -z "''${${_name}}" ] && ${_name}="$(${prompt})"
-          [ -z "''${${_name}}" ] && die "${promptError}" ${toString promptErrorExitCode}
-        '' else "";
-      ex = "[${shortDef}--${name}${if bool then "" else " ${argument}"}]";
-      helpDoc =
-        let
-          base = (if short != "" then "-${short}, " else "") + "--${name}";
-        in
-        (rightPad flagPadding base) +
-        "\t${description}" +
-        "${if hasDefault then " [default: '${default}']" else ""}" +
-        "${if hasPrompt then " [will prompt if not passed in]" else ""}" +
-        "${if bool then " [bool]" else ""}"
-      ;
-      definition = ''
-        ${shortDef}--${name})
-            ${_name}=${if bool then "1" else "$2"}
-            shift ${if bool then "" else "2"}
-            ;;'';
-      completionBlock =
-        if hasCompletion then ''
-          elif [[ $previous = -${short} ]] || [[ $previous = --${name} ]]; then
-            # shellcheck disable=SC2116
-            completions=$(${completion})
-            # shellcheck disable=SC2207
-            COMPREPLY=( $(compgen -W "$completions" -- "$current") )
-        '' else "";
-    };
+    }:
+    if bool && optionalValue then
+      throw "pog: flag `--${name}` cannot be boolean and take an optional value"
+    else
+      let
+        assign = value: ''
+          _pog_seen_${_name}=1
+          ${
+            if repeatable && bool then
+              ''${_name}=$(( ''${${_name}:-0} + 1 ))''
+            else if repeatable then
+              ''${_name}+=(${value})''
+            else if bool then
+              ''${_name}=1''
+            else
+              ''${_name}=${value}''
+          }
+        '';
+        missingValue = option: ''
+          printf 'option %s requires an argument\n' '${option}' >&2
+          return 2
+        '';
+        unexpectedValue = option: ''
+          printf 'option %s does not accept an argument\n' '${option}' >&2
+          return 2
+        '';
+        longPassthroughCase =
+          if bool then ''
+            --${name})
+              ${assign "1"}
+              shift
+              ;;
+            --${name}=*)
+              ${unexpectedValue "--${name}"}
+              ;;
+          '' else if optionalValue then ''
+            --${name})
+              ${assign ''""''}
+              shift
+              ;;
+            --${name}=*)
+              ${assign ''"''${1#*=}"''}
+              shift
+              ;;
+          '' else ''
+            --${name})
+              if [[ $# -lt 2 ]]; then
+                ${missingValue "--${name}"}
+              fi
+              ${assign ''"$2"''}
+              shift 2
+              ;;
+            --${name}=*)
+              ${assign ''"''${1#*=}"''}
+              shift
+              ;;
+          '';
+        shortPassthroughCase =
+          if short == "" then
+            ""
+          else if bool then ''
+            -${short})
+              ${assign "1"}
+              shift
+              ;;
+          '' else if optionalValue then ''
+            -${short})
+              ${assign ''""''}
+              shift
+              ;;
+            -${short}?*)
+              ${assign ''"''${1#-${short}}"''}
+              shift
+              ;;
+          '' else ''
+            -${short})
+              if [[ $# -lt 2 ]]; then
+                ${missingValue "-${short}"}
+              fi
+              ${assign ''"$2"''}
+              shift 2
+              ;;
+            -${short}?*)
+              ${assign ''"''${1#-${short}}"''}
+              shift
+              ;;
+          '';
+      in
+      {
+        inherit short default bool marker description optionalValue repeatable hidden persistent;
+        cliName = name;
+        name = _name;
+        seenName = "_pog_seen_${_name}";
+        carapaceName = "${if short != "" then "-${short}, " else ""}--${name}"
+          + "${if optionalValue then "?" else if bool then "" else "="}"
+          + "${if repeatable then "*" else ""}"
+          + "${if hidden then "&" else ""}";
+        carapaceCompletion = if hasCompletion then completionToCarapace "flag" completion else null;
+        shortOpt = "${short}${marker}";
+        longOpt = "${name}${marker}";
+        flagDefault =
+          if repeatable && bool then
+            ''${_name}="''${${envVar}:-${if hasDefault then default else "0"}}"''
+          else if repeatable then
+            ''
+              ${_name}=()
+              _pog_default_${_name}="''${${envVar}:-${default}}"
+              if [[ -n "''${_pog_default_${_name}}" ]]; then
+                ${_name}+=("''${_pog_default_${_name}}")
+              fi
+            ''
+          else
+            ''${_name}="''${${envVar}:-${default}}"'';
+        seenDefault = '': "''${_pog_seen_${_name}:=0}"'';
+        flagPrompt =
+          if hasPrompt then ''
+            [ -z "''${${_name}}" ] && ${_name}="$(${prompt})"
+            [ -z "''${${_name}}" ] && die "${promptError}" ${toString promptErrorExitCode}
+          '' else "";
+        ex = "[${shortDef}--${name}${if bool then "" else " ${if optionalValue then "[${argument}]" else argument}"}]${if repeatable then "..." else ""}";
+        helpDoc =
+          let
+            base = (if short != "" then "-${short}, " else "") + "--${name}";
+          in
+          (rightPad flagPadding base) +
+          "\t${description}" +
+          "${if hasDefault then " [default: '${default}']" else ""}" +
+          "${if hasPrompt then " [will prompt if not passed in]" else ""}" +
+          "${if bool then " [bool]" else ""}" +
+          "${if optionalValue then " [optional value]" else ""}" +
+          "${if repeatable then " [repeatable]" else ""}" +
+          "${if persistent then " [persistent]" else ""}"
+        ;
+        definition = ''
+          ${shortDef}--${name})
+              ${assign (if bool then "1" else ''"$2"'')}
+              shift ${if bool then "" else "2"}
+              ;;'';
+        passthroughCases = longPassthroughCase + shortPassthroughCase;
+        passthroughShortValidationCase =
+          if short == "" then
+            ""
+          else if bool then ''
+            ${short}) ;;
+          '' else ''
+            ${short}) break ;;
+          '';
+        passthroughShortCase =
+          if short == "" then
+            ""
+          else if bool then ''
+            ${short})
+              ${assign "1"}
+              ;;
+          '' else if optionalValue then ''
+            ${short})
+              _pog_cluster_value="''${_pog_cluster:$((_pog_index + 1))}"
+              ${assign ''"$_pog_cluster_value"''}
+              break
+              ;;
+          '' else
+            ''
+              ${short})
+                _pog_cluster_value="''${_pog_cluster:$((_pog_index + 1))}"
+                if [[ -n "$_pog_cluster_value" ]]; then
+                  ${assign ''"$_pog_cluster_value"''}
+                else
+                  if [[ $# -lt 2 ]]; then
+                    ${missingValue "-${short}"}
+                  fi
+                  ${assign ''"$2"''}
+                  _pog_cluster_consume_next=1
+                fi
+                break
+                ;;
+            '';
+      };
 
   foo = pog {
     name = "foo";

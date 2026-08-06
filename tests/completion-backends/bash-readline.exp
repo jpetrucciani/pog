@@ -1,0 +1,122 @@
+proc expect_prompt {} {
+  global spawn_id
+
+  expect {
+    -exact "__POG_PROMPT__> " { return }
+    timeout { error "timed out waiting for the Bash prompt" }
+    eof { error "Bash exited before displaying a prompt" }
+  }
+}
+
+proc capture_readline {} {
+  global spawn_id
+
+  send -- "\t\007"
+  expect {
+    -re {__POG_LINE__=<([^\r\n]*)>\r?\n__POG_POINT__=<([0-9]+)>} {
+      return [list $expect_out(1,string) $expect_out(2,string)]
+    }
+    timeout { error "timed out waiting for the Readline state" }
+    eof { error "Bash exited before reporting the Readline state" }
+  }
+}
+
+proc assert_completion_at {name input cursor_left expected_line expected_point} {
+  global pass_count spawn_id
+
+  send -- "\001\013"
+  send -- $input
+  for {set index 0} {$index < $cursor_left} {incr index} {
+    send -- "\002"
+  }
+
+  lassign [capture_readline] actual_line actual_point
+  if {$actual_line ne $expected_line} {
+    error "$name line mismatch: expected=<$expected_line> actual=<$actual_line>"
+  }
+  if {$actual_point != $expected_point} {
+    error "$name cursor mismatch: expected=<$expected_point> actual=<$actual_point>"
+  }
+
+  incr pass_count
+}
+
+proc assert_completion {name input expected_line} {
+  assert_completion_at $name $input 0 $expected_line [string length $expected_line]
+}
+
+proc main {} {
+  global env pass_count spawn_id timeout
+
+  set timeout 5
+  set pass_count 0
+  set env(HISTFILE) /dev/null
+  set env(HOME) $env(POG_EXPECT_HOME)
+  set env(INPUTRC) /dev/null
+  set env(LC_ALL) C
+  set env(PS1) "__POG_PROMPT__> "
+  set env(TERM) dumb
+  unset -nocomplain env(BASH_ENV) env(ENV)
+  log_user 0
+  log_file -noappend $env(POG_EXPECT_LOG)
+
+  spawn -noecho $env(POG_EXPECT_BASH) --noprofile --norc -i
+  expect_prompt
+  send -- "source \"$env(POG_EXPECT_COMPLETION)\"; source \"$env(POG_EXPECT_STRUCTURED_COMPLETION)\"; cd \"$env(POG_EXPECT_WORK)\"\r"
+  expect_prompt
+  send -- {_pog_capture() { printf "\n__POG_LINE__=<%s>\n" "$READLINE_LINE"; printf "__POG_POINT__=<%s>\n" "$READLINE_POINT"; }; bind -x '"\C-g":_pog_capture'}
+  send -- "\r"
+  expect_prompt
+
+  assert_completion \
+    "flag completion" \
+    {pog-completion-fixture --dry} \
+    {pog-completion-fixture --dry-run }
+  assert_completion \
+    "dynamic flag value" \
+    {pog-completion-fixture --config d} \
+    {pog-completion-fixture --config dev }
+  assert_completion \
+    "nested positional completion" \
+    {pog-completion-fixture project open a} \
+    {pog-completion-fixture project open alpha }
+  assert_completion \
+    "native file fallback" \
+    {pog-completion-fixture project list nat} \
+    {pog-completion-fixture project list native-target }
+  assert_completion \
+    "directory fallback" \
+    {pog-completion-fixture project list di} \
+    {pog-completion-fixture project list directory/}
+  assert_completion \
+    "filename with spaces" \
+    {pog-completion-fixture project list spa} \
+    {pog-completion-fixture project list "space target" }
+  assert_completion \
+    "quoted filename" \
+    {pog-completion-fixture project list "spa} \
+    {pog-completion-fixture project list "space target" }
+  assert_completion_at \
+    "middle-of-line cursor" \
+    {pog-completion-fixture project open a tail} \
+    5 \
+    {pog-completion-fixture project open alpha tail} \
+    [string length {pog-completion-fixture project open alpha}]
+  assert_completion \
+    "structured multipart completion" \
+    {pog-structured-completion-fixture --multipart key=a} \
+    {pog-structured-completion-fixture --multipart key=alpha }
+
+  if {$pass_count != 9} {
+    error "expected 9 Readline cases, ran $pass_count"
+  }
+
+  send -- "\001\013exit\r"
+  expect eof
+  puts "PASS: $pass_count real Bash Readline completion cases"
+}
+
+if {[catch {main} failure]} {
+  puts stderr "Bash Readline completion failed: $failure"
+  exit 1
+}

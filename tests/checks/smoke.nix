@@ -93,8 +93,31 @@ let
       bash \
       "$completion" \
       > "$TMPDIR/completion"
-    grep -F 'complete -F _pog-commands-fixture pog-commands-fixture' \
+    grep -F 'complete -o noquote -F _pog-commands-fixture_completion pog-commands-fixture' \
       "$TMPDIR/completion"
+
+    test -s ${fixtures.commands}/share/carapace/specs/pog-commands-fixture.yaml
+    completion_command=${fixtures.commands}/bin/_pog-commands-fixture_complete
+    test -x "$completion_command"
+    test "$completion_command" = ${fixtures.commands.pog.completionCommand}
+    "$completion_command" export pog-commands-fixture group s \
+      > "$TMPDIR/completion-export.json"
+    ${pkgs.jq}/bin/jq -e '.values | any(.value == "show")' \
+      "$TMPDIR/completion-export.json" > /dev/null
+    test -s ${fixtures.commands}/share/fish/vendor_completions.d/pog-commands-fixture.fish
+    test -s ${fixtures.commands}/share/zsh/site-functions/_pog-commands-fixture
+    test -s ${fixtures.commands}/share/nushell/vendor/autoload/pog-commands-fixture.nu
+    for shell in \
+      bash bash-ble cmd-clink elvish fish nushell oil powershell tcsh xonsh zsh; do
+      for adapter in "${fixtures.commands}/share/pog/completions/$shell"/*; do
+        test -s "$adapter"
+        grep -F "$completion_command" "$adapter" > /dev/null
+        if grep -F ${fixtures.commands.pog.completionSpec} "$adapter" > /dev/null; then
+          echo "completion adapter bypasses installed completion command: $adapter" >&2
+          exit 1
+        fi
+      done
+    done
 
     touch "$out"
   '';

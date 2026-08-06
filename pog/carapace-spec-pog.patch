@@ -1,0 +1,207 @@
+diff --git a/core.go b/core.go
+index d1358c3..0da4fd9 100644
+--- a/core.go
++++ b/core.go
+@@ -3,8 +3,12 @@ package spec
+ import (
++	"encoding/json"
+ 	"fmt"
+ 	"runtime"
++	"strconv"
+ 	"strings"
++	"time"
+ 
+ 	"github.com/carapace-sh/carapace"
++	"github.com/carapace-sh/carapace/pkg/cache/key"
+ 	shlex "github.com/carapace-sh/carapace-shlex"
+ )
+@@ -33,5 +37,7 @@ func init() {
+ 	}))
+ 	addCoreMacro("bash", MacroI(func(s string) carapace.Action { return shell("bash", s) }))
++	addCoreMacro("pogDynamic", MacroI(pogDynamic))
++	addCoreMacro("pogValues", MacroI(pogValues))
+ 	addCoreMacro("cmd", MacroI(func(s string) carapace.Action { return shell("cmd", s) }))
+ 	addCoreMacro("elvish", MacroI(func(s string) carapace.Action { return shell("elvish", s) }))
+ 	addCoreMacro("fish", MacroI(func(s string) carapace.Action { return shell("fish", s) }))
+@@ -46,25 +52,163 @@ func init() {
+ 
+ func shell(shell, command string) carapace.Action {
+ 	return carapace.ActionCallback(func(c carapace.Context) carapace.Action {
+-		args, err := shellArgs(shell, command, c.Args...)
+-		if err != nil {
+-			return carapace.ActionMessage(err.Error())
+-		}
+-		return carapace.ActionExecCommand(shell, args...)(func(output []byte) carapace.Action {
+-			lines := strings.Split(string(output), "\n")
+-			batch := carapace.Batch()
+-			for _, line := range lines {
+-				switch shell {
+-				case "cmd", "pwsh":
+-					line = strings.TrimSuffix(line, "\r")
+-				}
+-				if line != "" {
+-					batch = append(batch, parseValue(line))
+-				}
++		return shellAction(c, shell, command, c.Args...)
++	})
++}
++
++type pogCandidate struct {
++	Value       string `json:"value"`
++	Description string `json:"description"`
++	Style       string `json:"style"`
++	Tag         string `json:"tag"`
++}
++
++func pogValues(encoded string) carapace.Action {
++	var candidates []pogCandidate
++	if err := json.Unmarshal([]byte(encoded), &candidates); err != nil {
++		return carapace.ActionMessage(err.Error())
++	}
++
++	batch := carapace.Batch()
++	for _, candidate := range candidates {
++		action := carapace.ActionStyledValuesDescribed(
++			candidate.Value,
++			candidate.Description,
++			candidate.Style,
++		)
++		if candidate.Tag != "" {
++			action = action.Tag(candidate.Tag)
++		}
++		batch = append(batch, action)
++	}
++	return batch.ToA()
++}
++
++type pogDynamicConfig struct {
++	Script       string   `json:"script"`
++	Legacy       string   `json:"legacy"`
++	CacheSeconds int      `json:"cacheSeconds"`
++	CacheBy      []string `json:"cacheBy"`
++}
++
++func pogDynamic(encoded string) carapace.Action {
++	var config pogDynamicConfig
++	if err := json.Unmarshal([]byte(encoded), &config); err != nil {
++		return carapace.ActionMessage(err.Error())
++	}
++
++	return carapace.ActionCallback(func(c carapace.Context) carapace.Action {
++		completionContext := addPogCompletionEnvironment(c)
++		arguments := []string{}
++		preamble := ""
++		invocation := "_pog_completion_provider"
++		if config.Legacy != "" {
++			previous := ""
++			if len(c.Args) > 0 {
++				previous = c.Args[len(c.Args)-1]
++			}
++			preamble = "current=$1; previous=$2; shift 2\n"
++			arguments = append(arguments, c.Value, previous)
++			if config.Legacy == "argument" {
++				invocation += " \"$current\""
++			}
++		}
++
++		wrapped := preamble + "_pog_completion_provider() {\n" + config.Script + "\n}\n" + invocation
++		action := shellCommand("bash", wrapped, arguments...)
++		if config.CacheSeconds <= 0 {
++			return action.Invoke(completionContext).ToA()
++		}
++
++		cacheValues := []string{encoded}
++		for _, selector := range config.CacheBy {
++			value, err := pogCacheValue(completionContext, selector)
++			if err != nil {
++				return carapace.ActionMessage(err.Error())
++			}
++			cacheValues = append(cacheValues, selector, value)
++		}
++		return action.Cache(
++			time.Duration(config.CacheSeconds)*time.Second,
++			key.String(cacheValues...),
++		).Invoke(completionContext).ToA()
++	})
++}
++
++func addPogCompletionEnvironment(c carapace.Context) carapace.Context {
++	c.Setenv("POG_COMPLETION_VALUE", c.Value)
++	c.Setenv("POG_COMPLETION_INDEX", strconv.Itoa(len(c.Args)))
++	c.Setenv("POG_COMPLETION_DIR", c.Dir)
++
++	for index, argument := range c.Args {
++		c.Setenv(fmt.Sprintf("POG_COMPLETION_ARG_%d", index), argument)
++	}
++	if encoded, err := json.Marshal(c.Args); err == nil {
++		c.Setenv("POG_COMPLETION_ARGS_JSON", string(encoded))
++	}
++
++	flags := make(map[string]string)
++	for _, variable := range c.Env {
++		name, value, found := strings.Cut(variable, "=")
++		if !found || !strings.HasPrefix(name, "C_FLAG_") {
++			continue
++		}
++		flagName := strings.TrimPrefix(name, "C_FLAG_")
++		flags[flagName] = value
++		environmentName := strings.NewReplacer("-", "_", ".", "_").Replace(flagName)
++		c.Setenv("POG_COMPLETION_FLAG_"+environmentName, value)
++	}
++	if encoded, err := json.Marshal(flags); err == nil {
++		c.Setenv("POG_COMPLETION_FLAGS_JSON", string(encoded))
++	}
++	return c
++}
++
++func pogCacheValue(c carapace.Context, selector string) (string, error) {
++	switch {
++	case selector == "cwd":
++		return c.Dir, nil
++	case selector == "value":
++		return c.Value, nil
++	case strings.HasPrefix(selector, "flag:"):
++		name := strings.ToUpper(strings.TrimPrefix(selector, "flag:"))
++		return c.Getenv("C_FLAG_" + name), nil
++	case strings.HasPrefix(selector, "argument:"):
++		index, err := strconv.Atoi(strings.TrimPrefix(selector, "argument:"))
++		if err != nil || index < 0 || index >= len(c.Args) {
++			return "", nil
++		}
++		return c.Args[index], nil
++	case strings.HasPrefix(selector, "env:"):
++		return c.Getenv(strings.TrimPrefix(selector, "env:")), nil
++	default:
++		return "", fmt.Errorf("unknown pog cache selector: %q", selector)
++	}
++}
++
++func shellAction(c carapace.Context, shell, command string, arguments ...string) carapace.Action {
++	return shellCommand(shell, command, arguments...).Invoke(c).ToA()
++}
++
++func shellCommand(shell, command string, arguments ...string) carapace.Action {
++	args, err := shellArgs(shell, command, arguments...)
++	if err != nil {
++		return carapace.ActionMessage(err.Error())
++	}
++	return carapace.ActionExecCommand(shell, args...)(func(output []byte) carapace.Action {
++		lines := strings.Split(string(output), "\n")
++		batch := carapace.Batch()
++		for _, line := range lines {
++			switch shell {
++			case "cmd", "pwsh":
++				line = strings.TrimSuffix(line, "\r")
++			}
++			if line != "" {
++				batch = append(batch, parseValue(line))
+ 			}
+-			return batch.ToA()
+-		}).Invoke(c).ToA()
+-	})
++		}
++		return batch.ToA()
++	})
+ }
+ 
+ func shellArgs(shell, command string, arguments ...string) ([]string, error) {

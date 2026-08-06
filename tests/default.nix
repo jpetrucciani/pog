@@ -6,6 +6,9 @@ let
   fixtures = import ./fixtures.nix {
     inherit pkgs pog;
   };
+  examples = import ../examples {
+    inherit pkgs pog;
+  };
 
   smokeChecks = import ./checks/smoke.nix {
     inherit fixtures pkgs pog;
@@ -21,7 +24,28 @@ let
     ordinary-commands = import ./checks/ordinary-commands.nix {
       inherit fixtures pkgs pog;
     };
+    ordinary-advanced-commands = import ./checks/ordinary-advanced-commands.nix {
+      inherit fixtures pkgs pog;
+    };
+    ordinary-examples = import ./checks/ordinary-examples.nix {
+      inherit examples pkgs;
+    };
+    ordinary-passthrough = import ./checks/ordinary-passthrough.nix {
+      inherit fixtures pkgs pog;
+    };
     ordinary-completion = import ./checks/ordinary-completion.nix {
+      inherit fixtures pkgs;
+    };
+    ordinary-completion-fish = import ./checks/ordinary-completion-fish.nix {
+      inherit fixtures pkgs;
+    };
+    ordinary-completion-readline = import ./checks/ordinary-completion-readline.nix {
+      inherit fixtures pkgs;
+    };
+    ordinary-completion-zsh = import ./checks/ordinary-completion-zsh.nix {
+      inherit fixtures pkgs;
+    };
+    ordinary-structured-completion = import ./checks/ordinary-structured-completion.nix {
       inherit fixtures pkgs;
     };
     ordinary-bash-bible = import ./checks/ordinary-bash-bible.nix {
@@ -58,9 +82,44 @@ let
       check = individualChecks.ordinary-commands;
     }
     {
+      name = "ordinary-advanced-commands";
+      description = "aliases, command groups, parsing modes, and advanced flags";
+      check = individualChecks.ordinary-advanced-commands;
+    }
+    {
+      name = "ordinary-examples";
+      description = "real cfg-derived example tools and their completions";
+      check = individualChecks.ordinary-examples;
+    }
+    {
+      name = "ordinary-passthrough";
+      description = "recognized-only flags with lossless forwarding of unknown arguments";
+      check = individualChecks.ordinary-passthrough;
+    }
+    {
       name = "ordinary-completion";
-      description = "generated command, flag, value, and argument completions";
+      description = "shared contract for flat and recursive Bash completions";
       check = individualChecks.ordinary-completion;
+    }
+    {
+      name = "ordinary-completion-fish";
+      description = "shared contract through Fish's completion interface";
+      check = individualChecks.ordinary-completion-fish;
+    }
+    {
+      name = "ordinary-completion-readline";
+      description = "real Bash tab completion, fallback, quoting, and cursor behavior";
+      check = individualChecks.ordinary-completion-readline;
+    }
+    {
+      name = "ordinary-completion-zsh";
+      description = "real Zsh tab completion, files, escaping, and cursor behavior";
+      check = individualChecks.ordinary-completion-zsh;
+    }
+    {
+      name = "ordinary-structured-completion";
+      description = "rich values, provider context, and dynamic completion caching";
+      check = individualChecks.ordinary-structured-completion;
     }
     {
       name = "ordinary-bash-bible";
@@ -117,12 +176,20 @@ let
     };
 in
 {
-  inherit allTests fixtures testSuite;
+  inherit allTests examples fixtures testSuite;
 
   packages = individualChecks // {
     minimal-fixture = fixtures.minimal;
     command-fixture = fixtures.commands;
     completion-fixture = fixtures.completion;
+    structured-completion-fixture = fixtures.structuredCompletion;
+    advanced-commands-fixture = fixtures.advancedCommands;
+    passthrough-fixture = fixtures.passthrough;
+    example-batwhich = examples.batwhich;
+    example-jwt-decode = examples.jwtDecode;
+    example-nix-summary = examples.nixSummary;
+    flat-completion-fixture = fixtures.flatCompletion;
+    no-short-default-completion-fixture = fixtures.noShortDefaultCompletion;
     flags-fixture = fixtures.flags;
     bash-bible-fixture = fixtures.bashBible;
     portable-fixture = fixtures.portable;
