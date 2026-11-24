@@ -5,32 +5,32 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: cachix/install-nix-action@v31
+      - uses: cachix/install-nix-action@v32
       - run: nix develop -c nixpkgs-fmt --check .
   statix:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: cachix/install-nix-action@v31
+      - uses: cachix/install-nix-action@v32
       - run: nix develop -c statix check
   deadnix:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: cachix/install-nix-action@v31
+      - uses: cachix/install-nix-action@v32
       - run: nix develop -c deadnix -f -_ -l .
   docs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: cachix/install-nix-action@v31
+      - uses: cachix/install-nix-action@v32
       - run: nix develop -c bun install --frozen-lockfile
       - run: nix develop -c bun run docs:build
   pog-tests:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: cachix/install-nix-action@v31
+      - uses: cachix/install-nix-action@v32
       - name: Evaluate every supported system
         run: nix flake check --all-systems --no-build
       - run: nix build .#test
@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: cachix/install-nix-action@v31
+      - uses: cachix/install-nix-action@v32
       - name: Allow unprivileged user namespaces
         run: |
           if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
